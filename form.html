@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Форма отправки</title>
+</head>
+<body>
+<main>
+    <p>Отправить эксель</p>
+    <form action="index.php" class="form-excel" method="post" enctype="multipart/form-data">
+        <p>Дата планируемой отгрузки: <input type="date" name="date" /></p>
+        <p>Эксель Питер: <input type="file" name="spbFile" id="spbFile"></p>
+        <p>Эксель Москва: <input type="file" name="mskFile" id="mskFile"></p>
+        <p><input type="submit" name="submit" /></p>
+    </form>
+</main>
+</body>
+</html>
