@@ -2,6 +2,8 @@
 
 include "vendor/autoload.php";
 
+use Dotenv\Dotenv;
+use \PhpOffice\PhpSpreadsheet\Exception as PhpSpreadsheetException;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 
 const LOG_FOLDER_ROOT = 'log'; // Название папки для хранения логов
@@ -16,13 +18,13 @@ const RECIPIENT_MSK = 'ozon_msk';
 const SUFFIX_MSK = 'msk';
 
 // Из файла .env берем значения для FTP соединения
-$dotenv = Dotenv\Dotenv::createImmutable(__DIR__);
+$dotenv = Dotenv::createImmutable(__DIR__);
 $dotenv->load();
 
 // Установка часового пояса как в примере (где бы не выполнялся скрипт - одинаковое время)
 date_default_timezone_set('Europe/Moscow');
 
-// Ошибки Ftp могут выкидывать Warning вместо Exception. Эти 3 строки выбрасывают исключение при Warning
+// Преобразуют Warning в Exception. Ошибки Ftp могут выкидывать Warning. Имплементировано для логирования содержимого
 set_error_handler(function ($err_severity, $err_msg, $err_file, $err_line, array $err_context)
 {
     throw new ErrorException( $err_msg, 0, $err_severity, $err_file, $err_line );
@@ -47,8 +49,8 @@ function main() {
             throw new Exception("date не прислана");
         }
 
-        if ((!isset($_FILES[FILENAME_SPB]) || $_FILES[FILENAME_SPB][FIELD_NAME_SIZE] == 0) &&
-            (!isset($_FILES[FILENAME_MSK]) || $_FILES[FILENAME_MSK][FIELD_NAME_SIZE] == 0)) {
+        if ((!isset($_FILES[FILENAME_SPB]) || 0 == $_FILES[FILENAME_SPB][FIELD_NAME_SIZE]) &&
+            (!isset($_FILES[FILENAME_MSK]) || 0 == $_FILES[FILENAME_MSK][FIELD_NAME_SIZE])) {
             throw new Exception("Ни одна таблица не прислана");
         }
 
@@ -65,15 +67,11 @@ function main() {
 
         logMessage("Скрипт отработал без ошибок. Количество отправленных файлов: $successCount");
 
-    } catch (ErrorException $e) { // Будет выбрасываться в определенных случаях Ftp-соединения
-        logMessage("Словили Warning (не Exception): " . $e->getMessage());
-        http_response_code(400);
-        echo "Словили Warning. Содержание в логе (проблема должна быть с работой Ftp)";
-    } catch (DOMException|\PhpOffice\PhpSpreadsheet\Exception $e) {
+    } catch (DOMException|PhpSpreadsheetException $e) {
         logMessage($e->getMessage());
         http_response_code(400);
         echo "Прислана таблица с несоответствующим содержанием";
-    } catch (Exception $e) { // Здесь ожидаются лишь явно вызванные исключения
+    } catch (Exception $e) {
         logMessage($e->getMessage());
         http_response_code(400);
         echo $e->getMessage();
@@ -91,14 +89,14 @@ function main() {
  * @return void
  *
  * @throws DOMException
- * @throws \PhpOffice\PhpSpreadsheet\Exception
+ * @throws PhpSpreadsheetException
  * @throws Exception Тут должны быть только исключения только явно вызванные в коде
  */
 function processExcel(string $fileName, string $recipient, string $suffix)
 {
     // Адрес где будет храниться временный созданный файл
     $newFileName = "candy_order_xml_{$suffix}.xml";
-    $localFilePath = sys_get_temp_dir() . "/{$newFileName}";
+    $localFilePath = sys_get_temp_dir() . DIRECTORY_SEPARATOR . $newFileName;
 
     // Создание xml файла в указанном пути
     createXml($fileName, $recipient, $localFilePath);
@@ -117,7 +115,7 @@ function processExcel(string $fileName, string $recipient, string $suffix)
  * @return void
  *
  * @throws DOMException
- * @throws \PhpOffice\PhpSpreadsheet\Exception
+ * @throws PhpSpreadsheetException
  */
 function createXml(string $fileName, string $recipient, string $localFilePath) {
 
@@ -214,6 +212,7 @@ function createXml(string $fileName, string $recipient, string $localFilePath) {
  * @return void
  *
  * @throws Exception
+ * @throws ErrorException Выбрасывается вместо Warning - значит ошибка соединения с ftp
  */
 function uploadOnFtp(string $newFileName, string $localFilePath) {
     $ftp = ftp_connect($_ENV['FTP_SERVER']); // установка соединения
@@ -223,20 +222,17 @@ function uploadOnFtp(string $newFileName, string $localFilePath) {
     }
 
     if (!ftp_login($ftp, $_ENV['FTP_USER'], $_ENV['FTP_PASSWORD'])) {
-        throw new Exception("FTP ошибка: Логин / Пароль не подошли");
+// До этой строки дойти не должно, т.к. прежде должен выброситься Warning, а он должен выбросить ErrorException (мы переделали)
+        throw new Exception("FTP ошибка: Неверный логин / пароль");
     }
 
     ftp_pasv($ftp, true);
 
-    if (ftp_put($ftp, $newFileName, $localFilePath, FTP_ASCII)) { // загрузка файла
-        echo "$newFileName успешно загружен на сервер <br>";
-    } else {
-        // До этого иначе дойти не должно, т.к. прежде должен выброситься Warning, а он должен выбросить
-        // Exception (мы переделали). Иначе содержимое Warning появлялось на странице - нельзя было поменять статус-код
-        // с 200 на другой и надо было содержимое Warning поместить в лог.
+    if (!ftp_put($ftp, $newFileName, $localFilePath, FTP_ASCII)) { // загрузка файла
         throw new Exception("Не удалось загрузить $newFileName на сервер");
     }
 
+    echo "$newFileName успешно загружен на сервер <br>";
     ftp_close($ftp); // закрытие соединения
 }
 
@@ -250,7 +246,11 @@ function uploadOnFtp(string $newFileName, string $localFilePath) {
 function logMessage(string $logString): void
 {
     $logFolder = LOG_FOLDER_ROOT . DIRECTORY_SEPARATOR . date('Y') . DIRECTORY_SEPARATOR . date('m');
-    checkLogFolders($logFolder);
+
+    if (!is_dir($logFolder)) { // Проверяет создана ли соответствующая папка для лога. Создает, если не существует
+        mkdir($logFolder, 0777, true);
+    }
+
     $logFileAddress = $logFolder . DIRECTORY_SEPARATOR . date('d') . '.log';
 
     $postContents = "Были присланы данные:" . PHP_EOL;
@@ -266,21 +266,4 @@ function logMessage(string $logString): void
 
     $logString = date('H-i-s') . ": " . $logString . PHP_EOL . $postContents;
     file_put_contents($logFileAddress, $logString, FILE_APPEND);
-}
-
-/**
- * Проверяет создана ли соответствующая папка для лога. Создает, если не существует
- *
- * @param string $logFolder
- *
- * @return void
- */
-function checkLogFolders(string $logFolder): void
-{
-    if (!is_dir(LOG_FOLDER_ROOT)) {
-        mkdir(LOG_FOLDER_ROOT, 0777, true);
-    }
-    if (!is_dir($logFolder)) {
-        mkdir($logFolder, 0777, true);
-    }
 }
