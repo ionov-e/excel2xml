@@ -17,21 +17,33 @@ const FILENAME_MSK = 'mskFile';
 const RECIPIENT_MSK = 'ozon_msk';
 const SUFFIX_MSK = 'msk';
 
-// Из файла .env берем значения для FTP соединения
-$dotenv = Dotenv::createImmutable(__DIR__);
-$dotenv->load();
+$alert = false;
+$alertClass = 'danger';
+$msg = "";
+
+$minDate = new DateTime();
+$modifyDays = 1;
+if(date("H") > 15 || (date("H") == 15 && date("i") > 30)) {
+    $modifyDays = 2;
+}
+
+if(isset($_POST['submit'])) {
+    // Из файла .env берем значения для FTP соединения
+    $dotenv = Dotenv::createImmutable(__DIR__);
+    $dotenv->load();
 
 // Установка часового пояса как в примере (где бы не выполнялся скрипт - одинаковое время)
-date_default_timezone_set('Europe/Moscow');
+    date_default_timezone_set('Europe/Moscow');
 
 // Преобразуют Warning в Exception. Ошибки Ftp могут выкидывать Warning. Имплементировано для логирования содержимого
-set_error_handler(function ($err_severity, $err_msg, $err_file, $err_line, array $err_context)
-{
-    throw new ErrorException( $err_msg, 0, $err_severity, $err_file, $err_line );
-}, E_WARNING);
+    set_error_handler(function ($err_severity, $err_msg, $err_file, $err_line, array $err_context)
+    {
+        throw new ErrorException( $err_msg, 0, $err_severity, $err_file, $err_line );
+    }, E_WARNING);
 
 // Вызов главной функции
-main();
+    main($alert, $alertClass, $msg);
+}
 
 // ---------------------------------------------- Функции
 
@@ -40,13 +52,13 @@ main();
  *
  * @return void
  */
-function main() {
+function main(&$alert, &$alertClass, &$msg) {
     try {
         $successCount = 0; // Считает сколько файлов успешно отправили
 
         // Проверки на отсутствие присланных данных
         if (!$_POST["date"]) {
-            throw new Exception("date не прислана");
+            throw new Exception("не указана дата отгрузки не прислана");
         }
 
         if ((!isset($_FILES[FILENAME_SPB]) || 0 == $_FILES[FILENAME_SPB][FIELD_NAME_SIZE]) &&
@@ -65,18 +77,20 @@ function main() {
             $successCount++;
         }
 
-        logMessage("Скрипт отработал без ошибок. Количество отправленных файлов: $successCount");
+        $msg = "Скрипт отработал без ошибок. Количество отправленных файлов: $successCount";
+        $alertClass = 'success';
+        $alert = true;
 
     } catch (DOMException|PhpSpreadsheetException $e) {
         logMessage($e->getMessage());
         http_response_code(400);
-        echo "Прислана таблица с несоответствующим содержанием";
+        $msg = "Прислана таблица с несоответствующим содержанием";
     } catch (Exception $e) {
-        logMessage($e->getMessage());
         http_response_code(400);
-        echo $e->getMessage();
+        $msg = $e->getMessage();
     }
-    exit();
+
+    logMessage($msg);
 }
 
 /**
@@ -232,7 +246,6 @@ function uploadOnFtp(string $newFileName, string $localFilePath) {
         throw new Exception("Не удалось загрузить $newFileName на сервер");
     }
 
-    echo "$newFileName успешно загружен на сервер <br>";
     ftp_close($ftp); // закрытие соединения
 }
 
@@ -267,3 +280,49 @@ function logMessage(string $logString): void
     $logString = date('H-i-s') . ": " . $logString . PHP_EOL . $postContents;
     file_put_contents($logFileAddress, $logString, FILE_APPEND);
 }
+?>
+
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Excel2Xml</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.1/dist/css/bootstrap.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.1/dist/js/bootstrap.bundle.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <?php if($alert):?>
+            <div id="alert" class="alert alert-<?php echo $alertClass?>">
+              <?php echo $msg?>
+            </div>
+        <?php endif;?>
+        <form action="" method="post" class="was-validated" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="date">Дата планируемой отгрузки:</label>
+                <input type="date" min="<?php echo $minDate->modify("+ {$modifyDays} days")->format("Y-m-d")?>" class="form-control" id="date" placeholder="Выберите дату отгрузки" name="date" required>
+                <div class="invalid-feedback">Обязательно для заполнения.</div>
+            </div>
+            <div class="form-group">
+                <label for="pwd">Эксель Питер:</label>
+                <input type="file" class="form-control" id="spbFile" placeholder="Выберите файл" name="spbFile">
+            </div>
+            <div class="form-group">
+                <label for="pwd">Эксель Москва:</label>
+                <input type="file" class="form-control" id="mskFile" placeholder="Выберите файл" name="mskFile">
+            </div>
+            <button type="submit" name="submit" class="btn btn-primary">Отправить</button>
+        </form>
+    </div>
+    <script>
+        $("#date").on('change', function () {
+            $("#alert").hide();
+        })
+    </script>
+</body>
+</html>
