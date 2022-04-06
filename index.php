@@ -11,11 +11,14 @@ const FIELD_NAME_SIZE = 'size';     // Поле содержащий разме�
 
 const FILENAME_SPB = 'spbFile';     // Наименование файла в теле POST
 const RECIPIENT_SPB = 'ozon_spb';   // Используется в XML (в 'claim_id')
-const SUFFIX_SPB = 'test_spb';      // Добавляется в конец названия файла перед расширением #TODO убрать 'test_'
 
 const FILENAME_MSK = 'mskFile';
 const RECIPIENT_MSK = 'ozon_msk';
-const SUFFIX_MSK = 'test_msk'; #TODO убрать 'test_'
+
+const RESULT_FILENAME = 'candy_order_xml_test.xml'; // С таким именем файл зальется на ФТП #TODO убрать 'test_'
+const MAX_OLD_DATE = '-14 days'; // Используется в функции strtotime. Максимальное количество дней для хранения 'shippment_claim'
+
+const OLD_XML_FILENAME = 'old_' . RESULT_FILENAME;  // Имя временного файла (прошлый xml файл с ФТП)
 
 $alert = false;
 $alertClass = 'danger';
@@ -28,7 +31,10 @@ if(date("H") > 15 || (date("H") == 15 && date("i") > 30)) {
 }
 
 if(isset($_POST['submit'])) {
-    // Из файла .env берем значения для FTP соединения
+
+    logStartMessage(); // Логирует старт работы с присланными данными
+
+// Из файла .env берем значения для FTP соединения
     $dotenv = Dotenv::createImmutable(__DIR__);
     $dotenv->load();
 
@@ -54,8 +60,6 @@ if(isset($_POST['submit'])) {
  */
 function main(&$alert, &$alertClass, &$msg) {
     try {
-        $successCount = 0; // Считает сколько файлов успешно отправили
-
         // Проверки на отсутствие присланных данных
         if (!$_POST["date"]) {
             throw new Exception("не указана дата отгрузки не прислана");
@@ -67,17 +71,22 @@ function main(&$alert, &$alertClass, &$msg) {
         }
 
         // Создание и отправка XML
+
+        $receivedExcels = [];
+
         if (isset($_FILES[FILENAME_SPB]) && $_FILES[FILENAME_SPB][FIELD_NAME_SIZE] > 0) {
-            processExcel(FILENAME_SPB, RECIPIENT_SPB, SUFFIX_SPB);
-            $successCount++;
+            $receivedExcels[] = [FILENAME_SPB, RECIPIENT_SPB];
         }
 
         if (isset($_FILES[FILENAME_MSK]) && $_FILES[FILENAME_MSK][FIELD_NAME_SIZE] > 0) {
-            processExcel(FILENAME_MSK, RECIPIENT_MSK, SUFFIX_MSK);
-            $successCount++;
+            $receivedExcels[] = [FILENAME_MSK, RECIPIENT_MSK];
         }
 
-        $msg = "Скрипт отработал без ошибок. Количество отправленных файлов: $successCount";
+        if (!empty($receivedExcels)) {
+            processData($receivedExcels);
+        }
+
+        $msg = "Скрипт отработал без ошибок. Количество отправленных файлов: " . count($receivedExcels);
         $alertClass = 'success';
         $alert = true;
 
@@ -94,11 +103,9 @@ function main(&$alert, &$alertClass, &$msg) {
 }
 
 /**
- * Обрабатывает таблицу, формирует xml, заливает на FTP
+ * Обрабатывает таблицы, формирует xml, заливает на FTP
  *
- * @param string $fileName  Наименование файла в теле POST
- * @param string $recipient Используется в XML (в 'claim_id')
- * @param string $suffix    Добавляется в конец названия файла перед расширением
+ * @param array $receivedExcels Массив, каждый элемент которого содержит [$fileName, $recipient] (имя файла в POST и claim_id)
  *
  * @return void
  *
@@ -106,39 +113,33 @@ function main(&$alert, &$alertClass, &$msg) {
  * @throws PhpSpreadsheetException
  * @throws Exception Тут должны быть только исключения только явно вызванные в коде
  */
-function processExcel(string $fileName, string $recipient, string $suffix)
+function processData(array $receivedExcels)
 {
-    // Адрес где будет храниться временный созданный файл
-    $newFileName = "candy_order_xml_{$suffix}.xml";
-    $localFilePath = sys_get_temp_dir() . DIRECTORY_SEPARATOR . $newFileName;
+    // Адрес где будет храниться временный созданный файл для передачи на фтп
+    $localFilePath = sys_get_temp_dir() . DIRECTORY_SEPARATOR . RESULT_FILENAME;
 
     // Создание xml файла в указанном пути
-    createXml($fileName, $recipient, $localFilePath);
+    createXml($receivedExcels, $localFilePath);
 
     // Отправка файла на FTP сервер
-    uploadOnFtp($newFileName, $localFilePath);
+    uploadToFtp(RESULT_FILENAME, $localFilePath);
 }
 
 /**
- * Обрабатывает excel таблицу и переделывает в xml. Записывает во временный указанный путь
+ * Создает XML-файл по указанному пути. Использует при создании Excel таблицы из Post и старый Xml с фтп-сервера
  *
- * @param string $fileName      Наименование файла в теле POST
- * @param string $recipient     Используется в XML (в 'claim_id')
+ * @param array $receivedExcels Массив, каждый элемент которого содержит [$fileName, $recipient] (имя файла в POST и claim_id)
  * @param string $localFilePath Путь куда сохранить созданный файл
  *
  * @return void
  *
  * @throws DOMException
+ * @throws ErrorException
  * @throws PhpSpreadsheetException
  */
-function createXml(string $fileName, string $recipient, string $localFilePath) {
+function createXml(array $receivedExcels, string $localFilePath) {
 
-    $date = $_POST['date']; // Полученная дата отгрузки
     $currentTime = new DateTime(); // Получение текущего времени
-
-    // Обработка полученной Excel таблицы
-    $spreadsheet = IOFactory::load($_FILES[$fileName]["tmp_name"]);
-    $worksheet = $spreadsheet->getActiveSheet();
 
     // Создание объекта для сохранения итогового XML-файла
     $dom = new DOMDocument();
@@ -168,6 +169,98 @@ function createXml(string $fileName, string $recipient, string $localFilePath) {
     $attrRoot2SupplierId = new DOMAttr('set_id', 'candy_sku_group');
     $root2->setAttributeNode($attrRoot2SupplierId);
 
+    // Создание 'shippment_claim' (последнего родительского элемента) вместе с товарами. Таких может быть несколько
+
+    // Обработка загруженных экселей
+    $roots3 = []; // Сюда будем складывать все 'shippment_claim' из экселей
+    foreach ($receivedExcels as $singleExcel) { // Добавляем 'shippment_claim' для каждого загруженного экселя
+        $roots3[] = excelToXmlNode($singleExcel[0], $singleExcel[1], $dom);
+    }
+
+    // Добавляем все 'shippment_claim' из уже отгруженного в прошлый раз xml на фтп
+    $oldRoots3 = processOldXml(); // Сюда сложили все roots3 из файла с фтп
+
+    // Вложение родительских элементов в соответствующем порядке: 1 - самый верхний, 2-ой вложен в 1-ый, 3-ие во 2-ой
+    $dom->appendChild($root1);
+    $root1->appendChild($root2);
+
+    foreach ($oldRoots3 as $singleOldRoot3) { // Вкладываем root3 из предыдущего xml (без неподходящих дат)
+        $newNode = $dom->importNode($singleOldRoot3, true);
+        $root2->appendChild($newNode);
+    }
+
+    foreach ($roots3 as $root3) { // Вкладываем root3 из экселей
+        $root2->appendChild($root3);
+    }
+
+    // Сохранение файла во временную папку
+    $dom->save($localFilePath);
+}
+
+/**
+ * Возвращает массив с root3 (только нужных дат) из xml файла с фтп сервера
+ *
+ * @return array
+ *
+ * @throws ErrorException
+ */
+function processOldXml(): array
+{
+    // Выкачиваем файл с фтп
+
+    $oldXmlFilePath = getXmlFromFtp();
+
+    if (empty($oldXmlFilePath)) {
+        return [];
+    }
+
+    // Получаем DOMDocument из файла
+
+    $oldXml = new DOMDocument();
+    $oldXml->load($oldXmlFilePath);
+
+    // Нам нужно вернуть только те 'shippment_claim', в которых аттрибут дата не позднее определенной даты
+
+    $returnArray = []; // Список для возвращения из функции
+
+    $countDeleted = 0; // Используется для логирования количества неподходящих по дате shippment_claim из старого файла
+
+    $roots3Array = $oldXml->getElementsByTagName('shippment_claim');
+
+    $minRelevantDate = date('Y-m-d', strtotime(MAX_OLD_DATE)); // Все что раньше этой даты не возвращать
+
+    foreach ($roots3Array as $singleRoot3) {
+        if ($singleRoot3->getAttribute('date') > $minRelevantDate) {
+            $returnArray[] = $singleRoot3;
+        } else {
+            $countDeleted++;
+        }
+    }
+
+    logMessage("Из старого файла удалено: $countDeleted");
+    return $returnArray;
+}
+
+/**
+ * Создание 'shippment_claim' (последнего родительского элемента xml) вместе с товарами из загруженного экселя
+ *
+ * @param string $fileName Имя файла с таблицей из тела Post-запроса
+ * @param string $recipient Используется в XML (в 'claim_id')
+ * @param DOMDocument $dom Содержимое формируемого нашего нового XML файла
+ *
+ * @return DOMElement
+ *
+ * @throws DOMException
+ * @throws PhpSpreadsheetException
+ */
+function excelToXmlNode(string $fileName, string $recipient, DOMDocument &$dom): DOMElement
+{
+    $date = $_POST['date']; // Полученная дата отгрузки
+
+    // Обработка полученной Excel таблицы
+    $spreadsheet = IOFactory::load($_FILES[$fileName]["tmp_name"]);
+    $worksheet = $spreadsheet->getActiveSheet();
+
     // Создание и привязывание атрибутов к родительскому элементу 3
     $root3 = $dom->createElement('shippment_claim');
 
@@ -183,11 +276,6 @@ function createXml(string $fileName, string $recipient, string $localFilePath) {
     $root3->setAttributeNode($attrRoot3ClaimId);
     $attrRoot3Label = new DOMAttr('label', 'Озон/Кондиция/Обычные Покупатели');
     $root3->setAttributeNode($attrRoot3Label);
-
-    // Вложение родительских элементов в соответствующем порядке: 1 - самый верхний, 2-ой вложен в 1-ый, 3-ий во 2-ой
-    $root2->appendChild($root3);
-    $root1->appendChild($root2);
-    $dom->appendChild($root1);
 
     // Непосредственное создание товаров из таблицы эксель
     foreach ($worksheet->getRowIterator() as $row) { // Здесь перебираются строки
@@ -211,8 +299,37 @@ function createXml(string $fileName, string $recipient, string $localFilePath) {
         $root3->appendChild($product);
     }
 
-    // Сохранение файла во временную папку
-    $dom->save($localFilePath);
+    return $root3;
+}
+
+/**
+ * Выкачивает с фтп старый XML файл. Возвращает ссылку на скаченный файл, или пусто в случае если не было файла на фтп
+ *
+ * @return string Путь к скаченному предыдущему XML
+ *
+ * @throws ErrorException Выбрасывается вместо Warning - значит ошибка соединения с ftp
+ * @throws Exception
+ */
+function getXmlFromFtp(): string {
+    $localFilePathToOldXml = sys_get_temp_dir() . DIRECTORY_SEPARATOR . OLD_XML_FILENAME;
+
+    $ftp = connectToFtp();
+
+    $listOfFilesOnServer = ftp_nlist($ftp, '');
+
+    if (!in_array(RESULT_FILENAME, $listOfFilesOnServer)) {
+        logMessage('На фтп не было файла с именем: ' . RESULT_FILENAME);
+        return '';
+    }
+
+    if (!ftp_get($ftp, $localFilePathToOldXml, RESULT_FILENAME, FTP_ASCII)) { // загрузка файла
+        throw new Exception('Не удалось скачать с фтп файл: ' . RESULT_FILENAME);
+    }
+
+    ftp_close($ftp); // закрытие соединения
+
+    logMessage('Успешно скачали с фтп файл с именем: ' . RESULT_FILENAME);
+    return $localFilePathToOldXml;
 }
 
 /**
@@ -228,7 +345,26 @@ function createXml(string $fileName, string $recipient, string $localFilePath) {
  * @throws Exception
  * @throws ErrorException Выбрасывается вместо Warning - значит ошибка соединения с ftp
  */
-function uploadOnFtp(string $newFileName, string $localFilePath) {
+function uploadToFtp(string $newFileName, string $localFilePath) {
+    $ftp = connectToFtp();
+
+    if (!ftp_put($ftp, $newFileName, $localFilePath, FTP_ASCII)) { // загрузка файла
+        throw new Exception("Не удалось загрузить $newFileName на сервер");
+    }
+
+    ftp_close($ftp); // закрытие соединения
+}
+
+/**
+ * Устанавливает соединение с FTP-сервером. Убеждается в успешной логинизации
+ *
+ * @return resource
+
+ * @throws Exception
+ * @throws ErrorException Выбрасывается вместо Warning - значит ошибка соединения с ftp
+ */
+function connectToFtp()
+{
     $ftp = ftp_connect($_ENV['FTP_SERVER']); // установка соединения
 
     if (!$ftp) {
@@ -242,12 +378,29 @@ function uploadOnFtp(string $newFileName, string $localFilePath) {
 
     ftp_pasv($ftp, true);
 
-    if (!ftp_put($ftp, $newFileName, $localFilePath, FTP_ASCII)) { // загрузка файла
-        throw new Exception("Не удалось загрузить $newFileName на сервер");
+    return $ftp;
+}
+
+/**
+ * Логирует старт работы. Пишет в лог все что прислали из формы
+ *
+ * @return void
+ */
+function logStartMessage(): void
+{
+    $string = str_repeat("-", 50) . PHP_EOL . "Были присланы данные:";
+
+    if ($_POST["date"] && is_string($_POST["date"])) {
+        $string = $string . PHP_EOL . "Дата: " . $_POST["date"];
     }
 
-    ftp_close($ftp); // закрытие соединения
+    foreach ($_FILES as $key => $sentFile) {
+        $string = $string . PHP_EOL . $key . " ||| название файла: " . $sentFile["name"] . " ||| Размер: " . $sentFile["size"];
+    }
+
+    logMessage($string);
 }
+
 
 /**
  * Логирует сообщение
@@ -266,18 +419,7 @@ function logMessage(string $logString): void
 
     $logFileAddress = $logFolder . DIRECTORY_SEPARATOR . date('d') . '.log';
 
-    $postContents = "Были присланы данные:" . PHP_EOL;
-    if ($_POST["date"] && is_string($_POST["date"])) {
-        $postContents = $postContents . "Дата: " . $_POST["date"] . PHP_EOL;
-    }
-
-    foreach ($_FILES as $key => $sentFile) {
-        $postContents = $postContents . $key . " ||| название файла: " . $sentFile["name"] . " ||| Размер: " . $sentFile["size"] . PHP_EOL;
-    }
-
-    $postContents = $postContents . str_repeat("-", 50) . PHP_EOL;
-
-    $logString = date('H-i-s') . ": " . $logString . PHP_EOL . $postContents;
+    $logString = date('H-i-s') . ": " . $logString . PHP_EOL;
     file_put_contents($logFileAddress, $logString, FILE_APPEND);
 }
 ?>
