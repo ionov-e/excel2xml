@@ -6,16 +6,16 @@ use Dotenv\Dotenv;
 use \PhpOffice\PhpSpreadsheet\Exception as PhpSpreadsheetException;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 
-const LOG_FOLDER_ROOT = 'log'; // Название папки для хранения логов
-const FIELD_NAME_SIZE = 'size'; // Поле содержащий размер присланного файла
+const LOG_FOLDER_ROOT = 'log';      // Название папки для хранения логов
+const FIELD_NAME_SIZE = 'size';     // Поле содержащий размер присланного файла
 
-const FILENAME_SPB = 'spbFile';
-const RECIPIENT_SPB = 'ozon_spb';
-const SUFFIX_SPB = 'spb';
+const FILENAME_SPB = 'spbFile';     // Наименование файла в теле POST
+const RECIPIENT_SPB = 'ozon_spb';   // Используется в XML (в 'claim_id')
+const SUFFIX_SPB = 'test_spb';      // Добавляется в конец названия файла перед расширением #TODO убрать 'test_'
 
 const FILENAME_MSK = 'mskFile';
 const RECIPIENT_MSK = 'ozon_msk';
-const SUFFIX_MSK = 'msk';
+const SUFFIX_MSK = 'test_msk'; #TODO убрать 'test_'
 
 $alert = false;
 $alertClass = 'danger';
@@ -96,9 +96,9 @@ function main(&$alert, &$alertClass, &$msg) {
 /**
  * Обрабатывает таблицу, формирует xml, заливает на FTP
  *
- * @param string $fileName
- * @param string $recipient
- * @param string $suffix
+ * @param string $fileName  Наименование файла в теле POST
+ * @param string $recipient Используется в XML (в 'claim_id')
+ * @param string $suffix    Добавляется в конец названия файла перед расширением
  *
  * @return void
  *
@@ -122,9 +122,9 @@ function processExcel(string $fileName, string $recipient, string $suffix)
 /**
  * Обрабатывает excel таблицу и переделывает в xml. Записывает во временный указанный путь
  *
- * @param string $fileName
- * @param string $recipient
- * @param string $localFilePath
+ * @param string $fileName      Наименование файла в теле POST
+ * @param string $recipient     Используется в XML (в 'claim_id')
+ * @param string $localFilePath Путь куда сохранить созданный файл
  *
  * @return void
  *
@@ -220,8 +220,8 @@ function createXml(string $fileName, string $recipient, string $localFilePath) {
  *
  * Перезаписывает, если файл уже существует на FTP
  *
- * @param string $newFileName
- * @param string $localFilePath
+ * @param string $newFileName Этим именем будет называться файл залитый на ftp
+ * @param string $localFilePath Путь к существующему файлу для отправки
  *
  * @return void
  *
@@ -252,7 +252,7 @@ function uploadOnFtp(string $newFileName, string $localFilePath) {
 /**
  * Логирует сообщение
  *
- * @param string $logString
+ * @param string $logString Строка для логирования
  *
  * @return void
  */
@@ -310,11 +310,11 @@ function logMessage(string $logString): void
             </div>
             <div class="form-group">
                 <label for="pwd">Эксель Питер:</label>
-                <input type="file" class="form-control" id="spbFile" placeholder="Выберите файл" name="spbFile">
+                <input type="file" class="form-control" id="<?php echo FILENAME_SPB?>" placeholder="Выберите файл" name="<?php echo FILENAME_SPB?>">
             </div>
             <div class="form-group">
                 <label for="pwd">Эксель Москва:</label>
-                <input type="file" class="form-control" id="mskFile" placeholder="Выберите файл" name="mskFile">
+                <input type="file" class="form-control" id="<?php echo FILENAME_MSK?>" placeholder="Выберите файл" name="<?php echo FILENAME_MSK?>">
             </div>
             <button type="submit" name="submit" class="btn btn-primary">Отправить</button>
         </form>
