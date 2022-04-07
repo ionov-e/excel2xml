@@ -178,7 +178,7 @@ function createXml(array $receivedExcels, string $localFilePath) {
     }
 
     // Добавляем все 'shippment_claim' из уже отгруженного в прошлый раз xml на фтп
-    $oldRoots3 = processOldXml(); // Сюда сложили все roots3 из файла с фтп
+    $oldRoots3 = processOldXml($receivedExcels); // Сюда сложили все roots3 из файла с фтп
 
     // Вложение родительских элементов в соответствующем порядке: 1 - самый верхний, 2-ой вложен в 1-ый, 3-ие во 2-ой
     $dom->appendChild($root1);
@@ -200,11 +200,13 @@ function createXml(array $receivedExcels, string $localFilePath) {
 /**
  * Возвращает массив с root3 (только нужных дат) из xml файла с фтп сервера
  *
+ * @param array $receivedExcels Массив, каждый элемент которого содержит [$fileName, $recipient] (имя файла в POST и claim_id)
+ *
  * @return array
  *
  * @throws ErrorException
  */
-function processOldXml(): array
+function processOldXml(array $receivedExcels): array
 {
     // Выкачиваем файл с фтп
 
@@ -220,6 +222,7 @@ function processOldXml(): array
     $oldXml->load($oldXmlFilePath);
 
     // Нам нужно вернуть только те 'shippment_claim', в которых аттрибут дата не позднее определенной даты
+    // И если на присланную дату в присланном складе будет в старом Xml запись - ее не возвращать
 
     $returnArray = []; // Список для возвращения из функции
 
@@ -229,9 +232,19 @@ function processOldXml(): array
 
     $minRelevantDate = date('Y-m-d', strtotime(MAX_OLD_DATE)); // Все что раньше этой даты не возвращать
 
+    $recipientList = []; // Элемент - значение 'recipient' на каждый из присланных экселей
+    foreach ($receivedExcels as $singleReceivedExcel) {
+        $recipientList[] = $singleReceivedExcel[1];
+    }
+
     foreach ($roots3Array as $singleRoot3) {
-        if ($singleRoot3->getAttribute('date') > $minRelevantDate) {
-            $returnArray[] = $singleRoot3;
+        $root3Date = $singleRoot3->getAttribute('date');
+        $root3Recipient = $singleRoot3->getAttribute('recipient');
+        if ($root3Date > $minRelevantDate) { // Здесь убираем все, которые меньше даты
+            // Убираем, если на эту же дату и склад в прошлом XML была запись
+            if (!($root3Date == $_POST['date'] && in_array($root3Recipient, $recipientList))) {
+                $returnArray[] = $singleRoot3;
+            }
         } else {
             $countDeleted++;
         }
