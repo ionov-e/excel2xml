@@ -18,7 +18,8 @@ const RECIPIENT_MSK = 'ozon_msk';
 const RESULT_FILENAME = 'candy_order_xml_test.xml'; // С таким именем файл зальется на ФТП #TODO убрать 'test_'
 const MAX_OLD_DATE = '-14 days'; // Используется в функции strtotime. Максимальное количество дней для хранения 'shippment_claim'
 
-const OLD_XML_FILENAME = 'old_' . RESULT_FILENAME;  // Имя временного файла (прошлый xml файл с ФТП)
+const OLD_XML_FILENAME = 'old_' . RESULT_FILENAME;  // Произвольное имя временного файла (прошлый xml файл с ФТП)
+const TEMP_ROOT_ELEMENT = 'temp';                   // Произвольное имя элемента временного файла
 
 $alert = false;
 $alertClass = 'danger';
@@ -35,19 +36,23 @@ if(isset($_POST['submit'])) {
     logStartMessage(); // Логирует старт работы с присланными данными
 
 // Из файла .env берем значения для FTP соединения
+
     $dotenv = Dotenv::createImmutable(__DIR__);
     $dotenv->load();
 
 // Установка часового пояса как в примере (где бы не выполнялся скрипт - одинаковое время)
+
     date_default_timezone_set('Europe/Moscow');
 
 // Преобразуют Warning в Exception. Ошибки Ftp могут выкидывать Warning. Имплементировано для логирования содержимого
+
     set_error_handler(function ($err_severity, $err_msg, $err_file, $err_line, array $err_context)
     {
         throw new ErrorException( $err_msg, 0, $err_severity, $err_file, $err_line );
     }, E_WARNING);
 
 // Вызов главной функции
+
     main($alert, $alertClass, $msg);
 }
 
@@ -86,7 +91,7 @@ function main(&$alert, &$alertClass, &$msg) {
             processData($receivedExcels);
         }
 
-        $msg = "Скрипт отработал без ошибок. Количество отправленных файлов: " . count($receivedExcels);
+        $msg = "Скрипт отработал без ошибок. Количество полученных файлов: " . count($receivedExcels);
         $alertClass = 'success';
         $alert = true;
 
@@ -118,36 +123,103 @@ function processData(array $receivedExcels)
     // Адрес где будет храниться временный созданный файл для передачи на фтп
     $localFilePath = sys_get_temp_dir() . DIRECTORY_SEPARATOR . RESULT_FILENAME;
 
+    $allClaims = getAllClaims($receivedExcels); // Получение искомого массива из экселя и старого Xml
+
     // Создание xml файла в указанном пути
-    createXml($receivedExcels, $localFilePath);
+    createXml($allClaims, $localFilePath);
 
     // Отправка файла на FTP сервер
     uploadToFtp(RESULT_FILENAME, $localFilePath);
 }
 
 /**
- * Создает XML-файл по указанному пути. Использует при создании Excel таблицы из Post и старый Xml с фтп-сервера
+ * Возвращает массив с всеми отсортированными и отобранными 'shippment_claim' в виде нодов (Nodes) из временного DOMDocument
+ *
+ * Использует при создании Excel таблицы из Post и старый Xml с фтп-сервера
  *
  * @param array $receivedExcels Массив, каждый элемент которого содержит [$fileName, $recipient] (имя файла в POST и claim_id)
- * @param string $localFilePath Путь куда сохранить созданный файл
  *
- * @return void
+ * @return DOMNode[]
  *
  * @throws DOMException
  * @throws ErrorException
  * @throws PhpSpreadsheetException
  */
-function createXml(array $receivedExcels, string $localFilePath) {
+function getAllClaims(array $receivedExcels): array
+{
+    // Создание временного объекта для хранения содержимого будущего XML-файла с 'shippment_claim' без необходимых родительских категорий
+
+    $tempDom = new DOMDocument();
+    $tempDom->encoding = 'UTF-8';
+    $tempDom->xmlVersion = '1.1';
+    $tempDom->formatOutput = true;
+    $rootTempDom = $tempDom->createElement(TEMP_ROOT_ELEMENT); // Единственный родительский элемент
+    // В нем будем хранить все 'shippment_claim' (последнего родительского элемента) вместе с товарами. Таких может быть несколько
+    $tempDom->appendChild($rootTempDom); // Сразу вкладываем
+
+    // Получение массива 'shippment_claim' из загруженных экселей
+
+    $shipmentClaimsExcels = []; // Сюда будем складывать из экселя
+    foreach ($receivedExcels as $singleExcel) { // Добавляем один 'shippment_claim' для каждого загруженного экселя
+        $shipmentClaimsExcels[] = excelToXmlNode($singleExcel[0], $singleExcel[1], $tempDom);
+    }
+
+    // Получение массива 'shippment_claim' из предыдущего Xml файла с фтп-сервера
+
+    $shipmentClaimsOldXml = processOldXml($receivedExcels); // Сюда сложили все roots3 ('shippment_claim') из файла с фтп
+
+    // Вкладываем root3 из экселей
+
+    foreach ($shipmentClaimsExcels as $root3) {
+        $rootTempDom->appendChild($root3);
+    }
+
+    // Вкладываем root3 из предыдущего xml (без неподходящих дат)
+
+    foreach ($shipmentClaimsOldXml as $shipmentClaim) {
+        $newNode = $tempDom->importNode($shipmentClaim, true);
+        $rootTempDom->appendChild($newNode);
+    }
+
+    // Собираем в массив все элементы 'shippment_claim' (тут уже из экселей и Xml) как DomNodeList
+    $xpath = new DOMXpath($tempDom);
+    $tempNodeList = $xpath->evaluate('/' . TEMP_ROOT_ELEMENT . '/shippment_claim');
+
+    // Переводит наш DomNodeList в обычный массив
+    $tempClaims = iterator_to_array($tempNodeList);
+
+    // Сортируем наш массив (сортируем 'date' как обычную строку, т.к. формат одинаковый и подходящий: 'yyyy-mm-dd')
+    usort($tempClaims, static function($a, $b) {
+        return strcasecmp($a->getAttribute('date'), $b->getAttribute('date'));
+        }
+    );
+
+    return $tempClaims;
+}
+
+/**
+ * Создает XML-файл по указанному пути
+ *
+ * @param array $allClaims Массив со всеми отсортированными и отобранными 'shippment_claim' в виде нодов (Nodes) из временного DOMDocument
+ * @param string $localFilePath Путь куда сохранить созданный файл
+ *
+ * @return void
+ *
+ * @throws DOMException
+ */
+function createXml(array $allClaims, string $localFilePath): void {
 
     $currentTime = new DateTime(); // Получение текущего времени
 
     // Создание объекта для сохранения итогового XML-файла
+
     $dom = new DOMDocument();
     $dom->encoding = 'UTF-8';
     $dom->xmlVersion = '1.1';
     $dom->formatOutput = true;
 
     // Создание и привязывание атрибутов к родительскому элементу 1
+
     $root1 = $dom->createElement('shippment_claims_feed');
 
     $attrRoot1Version = new DOMAttr('version', '1.0');
@@ -160,6 +232,7 @@ function createXml(array $receivedExcels, string $localFilePath) {
     $root1->setAttributeNode($attrRoot1GeneratedAt);
 
     // Создание и привязывание атрибутов к родительскому элементу 2
+
     $root2 = $dom->createElement('shippment_claims');
 
     $attrRoot2ClientId = new DOMAttr('client_id', 'FIM');
@@ -169,36 +242,22 @@ function createXml(array $receivedExcels, string $localFilePath) {
     $attrRoot2SupplierId = new DOMAttr('set_id', 'candy_sku_group');
     $root2->setAttributeNode($attrRoot2SupplierId);
 
-    // Создание 'shippment_claim' (последнего родительского элемента) вместе с товарами. Таких может быть несколько
-
-    // Обработка загруженных экселей
-    $roots3 = []; // Сюда будем складывать все 'shippment_claim' из экселей
-    foreach ($receivedExcels as $singleExcel) { // Добавляем 'shippment_claim' для каждого загруженного экселя
-        $roots3[] = excelToXmlNode($singleExcel[0], $singleExcel[1], $dom);
-    }
-
-    // Добавляем все 'shippment_claim' из уже отгруженного в прошлый раз xml на фтп
-    $oldRoots3 = processOldXml($receivedExcels); // Сюда сложили все roots3 из файла с фтп
-
     // Вложение родительских элементов в соответствующем порядке: 1 - самый верхний, 2-ой вложен в 1-ый, 3-ие во 2-ой
+
     $dom->appendChild($root1);
     $root1->appendChild($root2);
-
-    foreach ($oldRoots3 as $singleOldRoot3) { // Вкладываем root3 из предыдущего xml (без неподходящих дат)
-        $newNode = $dom->importNode($singleOldRoot3, true);
+    foreach ($allClaims as $tempClaim) {
+        $newNode = $dom->importNode($tempClaim, true);
         $root2->appendChild($newNode);
     }
 
-    foreach ($roots3 as $root3) { // Вкладываем root3 из экселей
-        $root2->appendChild($root3);
-    }
-
     // Сохранение файла во временную папку
+
     $dom->save($localFilePath);
 }
 
 /**
- * Возвращает массив с root3 (только нужных дат) из xml файла с фтп сервера
+ * Возвращает массив со всеми 'shippment_claim' (только нужных дат) из xml файла с фтп сервера
  *
  * @param array $receivedExcels Массив, каждый элемент которого содержит [$fileName, $recipient] (имя файла в POST и claim_id)
  *
@@ -244,10 +303,10 @@ function processOldXml(array $receivedExcels): array
             // Убираем, если на эту же дату и склад в прошлом XML была запись
             if (!($root3Date == $_POST['date'] && in_array($root3Recipient, $recipientList))) {
                 $returnArray[] = $singleRoot3;
+                continue;
             }
-        } else {
-            $countDeleted++;
         }
+        $countDeleted++; // Сюда добираемся всегда, когда не добрались до строки с добавлением в массив
     }
 
     logMessage("Из старого файла удалено: $countDeleted");
@@ -271,10 +330,13 @@ function excelToXmlNode(string $fileName, string $recipient, DOMDocument &$dom):
     $date = $_POST['date']; // Полученная дата отгрузки
 
     // Обработка полученной Excel таблицы
+
     $spreadsheet = IOFactory::load($_FILES[$fileName]["tmp_name"]);
     $worksheet = $spreadsheet->getActiveSheet();
 
     // Создание и привязывание атрибутов к родительскому элементу 3
+    // Т.е. 'shippment_claim'. В экселе он будет лишь один
+
     $root3 = $dom->createElement('shippment_claim');
 
     $attrRoot3CustomerType = new DOMAttr('customerType', 'customer');
@@ -291,24 +353,28 @@ function excelToXmlNode(string $fileName, string $recipient, DOMDocument &$dom):
     $root3->setAttributeNode($attrRoot3Label);
 
     // Непосредственное создание товаров из таблицы эксель
+
     foreach ($worksheet->getRowIterator() as $row) { // Здесь перебираются строки
 
         $product = $dom->createElement('product'); // Создает элемент с товаром
         $cellIterator = $row->getCellIterator(); // Объект для выбора ячейки строки
 
         // Обработка ячейки из столбца 1
+
         $columnA = $cellIterator->seek('A'); // Выбираем столбец 1-ый
         $cellA = $columnA->current();
         $attrProductSku = new DOMAttr('sku', $cellA->getValue());
         $product->setAttributeNode($attrProductSku);
 
         // Обработка ячейки из столбца 2
+
         $columnB = $cellIterator->seek('B'); // Выбираем столбец 2-ой
         $cellB = $columnB->current();
         $attrProductQty = new DOMAttr('qty', $cellB->getValue());
         $product->setAttributeNode($attrProductQty);
 
         // Вкладываем товар в самый нижний элемент XML
+
         $root3->appendChild($product);
     }
 
