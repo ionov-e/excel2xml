@@ -3,7 +3,7 @@
 include "vendor/autoload.php";
 
 use Dotenv\Dotenv;
-use \PhpOffice\PhpSpreadsheet\Exception as PhpSpreadsheetException;
+use PhpOffice\PhpSpreadsheet\Exception as PhpSpreadsheetException;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 
 const LOG_FOLDER_ROOT = 'log';      // Название папки для хранения логов
@@ -27,11 +27,11 @@ $msg = "";
 
 $minDate = new DateTime();
 $modifyDays = 1;
-if(date("H") > 15 || (date("H") == 15 && date("i") > 30)) {
+if (date("H") > 15 || (date("H") == 15 && date("i") > 30)) {
     $modifyDays = 2;
 }
 
-if(isset($_POST['submit'])) {
+if (isset($_POST['submit'])) {
 
     logStartMessage(); // Логирует старт работы с присланными данными
 
@@ -46,9 +46,8 @@ if(isset($_POST['submit'])) {
 
 // Преобразуют Warning в Exception. Ошибки Ftp могут выкидывать Warning. Имплементировано для логирования содержимого
 
-    set_error_handler(function ($err_severity, $err_msg, $err_file, $err_line, array $err_context)
-    {
-        throw new ErrorException( $err_msg, 0, $err_severity, $err_file, $err_line );
+    set_error_handler(function ($err_severity, $err_msg, $err_file, $err_line, array $err_context) {
+        throw new ErrorException($err_msg, 0, $err_severity, $err_file, $err_line);
     }, E_WARNING);
 
 // Вызов главной функции
@@ -63,7 +62,8 @@ if(isset($_POST['submit'])) {
  *
  * @return void
  */
-function main(&$alert, &$alertClass, &$msg) {
+function main(&$alert, &$alertClass, &$msg)
+{
     try {
         // Проверки на отсутствие присланных данных
         if (!$_POST["date"]) {
@@ -189,9 +189,9 @@ function getAllClaims(array $receivedExcels): array
     $tempClaims = iterator_to_array($tempNodeList);
 
     // Сортируем наш массив (сортируем 'date' как обычную строку, т.к. формат одинаковый и подходящий: 'yyyy-mm-dd')
-    usort($tempClaims, static function($a, $b) {
+    usort($tempClaims, static function ($a, $b) {
         return strcasecmp($a->getAttribute('date'), $b->getAttribute('date'));
-        }
+    }
     );
 
     return $tempClaims;
@@ -207,8 +207,8 @@ function getAllClaims(array $receivedExcels): array
  *
  * @throws DOMException
  */
-function createXml(array $allClaims, string $localFilePath): void {
-
+function createXml(array $allClaims, string $localFilePath): void
+{
     $currentTime = new DateTime(); // Получение текущего времени
 
     // Создание объекта для сохранения итогового XML-файла
@@ -389,7 +389,8 @@ function excelToXmlNode(string $fileName, string $recipient, DOMDocument &$dom):
  * @throws ErrorException Выбрасывается вместо Warning - значит ошибка соединения с ftp
  * @throws Exception
  */
-function getXmlFromFtp(): string {
+function getXmlFromFtp(): string
+{
     $localFilePathToOldXml = sys_get_temp_dir() . DIRECTORY_SEPARATOR . OLD_XML_FILENAME;
 
     $ftp = connectToFtp();
@@ -424,7 +425,8 @@ function getXmlFromFtp(): string {
  * @throws Exception
  * @throws ErrorException Выбрасывается вместо Warning - значит ошибка соединения с ftp
  */
-function uploadToFtp(string $newFileName, string $localFilePath) {
+function uploadToFtp(string $newFileName, string $localFilePath)
+{
     $ftp = connectToFtp();
 
     if (!ftp_put($ftp, $newFileName, $localFilePath, FTP_ASCII)) { // загрузка файла
@@ -438,7 +440,6 @@ function uploadToFtp(string $newFileName, string $localFilePath) {
  * Устанавливает соединение с FTP-сервером. Убеждается в успешной логинизации
  *
  * @return resource
-
  * @throws Exception
  * @throws ErrorException Выбрасывается вместо Warning - значит ошибка соединения с ftp
  */
@@ -501,6 +502,7 @@ function logMessage(string $logString): void
     $logString = date('H-i-s') . ": " . $logString . PHP_EOL;
     file_put_contents($logFileAddress, $logString, FILE_APPEND);
 }
+
 ?>
 
 <!doctype html>
@@ -517,33 +519,36 @@ function logMessage(string $logString): void
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.1/dist/js/bootstrap.bundle.min.js"></script>
 </head>
 <body>
-    <div class="container">
-        <?php if($alert):?>
-            <div id="alert" class="alert alert-<?php echo $alertClass?>">
-              <?php echo $msg?>
-            </div>
-        <?php endif;?>
-        <form action="" method="post" class="was-validated" enctype="multipart/form-data">
-            <div class="form-group">
-                <label for="date">Дата планируемой отгрузки:</label>
-                <input type="date" min="<?php echo $minDate->modify("+ {$modifyDays} days")->format("Y-m-d")?>" class="form-control" id="date" placeholder="Выберите дату отгрузки" name="date" required>
-                <div class="invalid-feedback">Обязательно для заполнения.</div>
-            </div>
-            <div class="form-group">
-                <label for="pwd">Эксель Питер:</label>
-                <input type="file" class="form-control" id="<?php echo FILENAME_SPB?>" placeholder="Выберите файл" name="<?php echo FILENAME_SPB?>">
-            </div>
-            <div class="form-group">
-                <label for="pwd">Эксель Москва:</label>
-                <input type="file" class="form-control" id="<?php echo FILENAME_MSK?>" placeholder="Выберите файл" name="<?php echo FILENAME_MSK?>">
-            </div>
-            <button type="submit" name="submit" class="btn btn-primary">Отправить</button>
-        </form>
-    </div>
-    <script>
-        $("#date").on('change', function () {
-            $("#alert").hide();
-        })
-    </script>
+<div class="container">
+    <?php if ($alert): ?>
+        <div id="alert" class="alert alert-<?php echo $alertClass ?>">
+            <?php echo $msg ?>
+        </div>
+    <?php endif; ?>
+    <form action="" method="post" class="was-validated" enctype="multipart/form-data">
+        <div class="form-group">
+            <label for="date">Дата планируемой отгрузки:</label>
+            <input type="date" min="<?php echo $minDate->modify("+ {$modifyDays} days")->format("Y-m-d") ?>"
+                   class="form-control" id="date" placeholder="Выберите дату отгрузки" name="date" required>
+            <div class="invalid-feedback">Обязательно для заполнения.</div>
+        </div>
+        <div class="form-group">
+            <label for="pwd">Эксель Питер:</label>
+            <input type="file" class="form-control" id="<?php echo FILENAME_SPB ?>" placeholder="Выберите файл"
+                   name="<?php echo FILENAME_SPB ?>">
+        </div>
+        <div class="form-group">
+            <label for="pwd">Эксель Москва:</label>
+            <input type="file" class="form-control" id="<?php echo FILENAME_MSK ?>" placeholder="Выберите файл"
+                   name="<?php echo FILENAME_MSK ?>">
+        </div>
+        <button type="submit" name="submit" class="btn btn-primary">Отправить</button>
+    </form>
+</div>
+<script>
+    $("#date").on('change', function () {
+        $("#alert").hide();
+    })
+</script>
 </body>
 </html>
