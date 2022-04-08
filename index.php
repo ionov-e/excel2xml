@@ -31,7 +31,7 @@ $alertMsg = "";             // Содержание блока alert
 $warehouseMsg = "";         // Содержание для сообщения в Popup-окне в случае несоответствия с ассортиментом
 $localXmlPath = "";         // Адрес где будет храниться созданный файл для передачи на фтп
 
-$minDate = new DateTime();
+$currentTime = new DateTime();
 $modifyDays = 1;
 if (date("H") > 15 || (date("H") == 15 && date("i") > 30)) {
     $modifyDays = 2;

@@ -3,7 +3,7 @@
  * @var string $alertClass Класс alert блока - для выбора цвета
  * @var string $alertMsg Сообщение в alert блок
  *
- * @var DateTime $minDate Минимальная дата для возможной отгрузки
+ * @var DateTime $currentTime Текущее время, используемое для вычисления возможной отгрузки
  * @var int $modifyDays Количество дней от сегодня, в которые уже дата отгрузки невозможна
  *
  * @var string $warehouseMsg Сообщение для Popup-окна, в случае, когда отправили таблицу с несоответствиями с наличием
@@ -33,7 +33,7 @@
     <form action="" method="post" class="was-validated" enctype="multipart/form-data">
         <div class="form-group">
             <label for="date">Дата планируемой отгрузки:</label>
-            <input type="date" min="<?php echo $minDate->modify("+ {$modifyDays} days")->format("Y-m-d") ?>"
+            <input type="date" min="<?php echo $currentTime->modify("+ {$modifyDays} days")->format("Y-m-d") ?>"
                    class="form-control" id="date" placeholder="Выберите дату отгрузки" name="date" required>
             <div class="invalid-feedback">Обязательно для заполнения.</div>
         </div>
