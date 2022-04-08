@@ -15,6 +15,8 @@ const RECIPIENT_SPB = 'ozon_spb';   // Используется в XML (в 'clai
 const FILENAME_MSK = 'mskFile';
 const RECIPIENT_MSK = 'ozon_msk';
 
+const REFRESH_CLAIMS_TABLE_TIME = 2 * 60 * 60; // Через сколько времени считать таблицу неактуальной и пересоздать данные для нее
+
 const WAREHOUSE_PRICE_LIST_FILE = 'candy_pricing.xml'; // Название файла с ценами и количеством на фтп
 
 const RESULT_FILENAME = 'candy_order_xml_test.xml'; // С таким именем файл зальется на ФТП #TODO убрать 'test_'
@@ -37,21 +39,29 @@ if (date("H") > 15 || (date("H") == 15 && date("i") > 30)) {
     $modifyDays = 2;
 }
 
+// Выполнение преднастроек скрипта
+
+preSettings();
+
+// Обновление данных для таблицы с shipment claims, если старые
+
+$timeClaimsUpdated = filemtime (ALL_CLAIMS_COPY_PATH);
+
+if (time() - $timeClaimsUpdated > REFRESH_CLAIMS_TABLE_TIME) {
+    updateClaimsTable();
+}
+
 // ---------------------------------------------- Отправлена форма
 
 if (isset($_POST['submit-hard'])) {     // Форма из Popup-окна с подтверждением отправки файла несмотря на несоответствия с ассортиментом
 
     logMsg("В форме Popup окна решили отправить Xml несмотря на несоответствия с ассортиментом");
 
-    preSettings(); // Выполнение преднастроек скрипта
-
     execDespiteWarning($alertClass, $alertMsg); // Загрузить уже готовый с прошлого раза Xml
 
 } elseif (isset($_POST['submit'])) {    // Основная форма
 
     logStartMsg(); // Логирует старт работы с присланными данными
-
-    preSettings(); // Выполнение преднастроек скрипта
 
     main($alertClass, $alertMsg, $warehouseMsg, $localXmlPath); // Вызов главной функции
 }
