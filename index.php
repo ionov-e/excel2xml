@@ -23,6 +23,7 @@ const MAX_OLD_DATE = '-14 days'; // Используется в функции s
 const OLD_XML_FILENAME = 'old_' . RESULT_FILENAME;  // Произвольное имя временного файла (прошлый xml файл с ФТП)
 const TEMP_ROOT_ELEMENT = 'temp';                   // Произвольное имя элемента временного файла
 const GEN_FOLDER = 'gen';                           // Произвольное имя папки, где будем хранить сгенерированные файлы
+const ALL_CLAIMS_COPY_PATH = __DIR__ . DIRECTORY_SEPARATOR . GEN_FOLDER . DIRECTORY_SEPARATOR . 'all_claims.txt';
 
 $alertClass = "danger";     // Цвет блока alert
 $alertMsg = "";             // Содержание блока alert
@@ -122,6 +123,7 @@ function main(&$alertClass, &$alertMsg, &$warehouseMsg, &$localXmlPath)
         if (empty($warehouseMsg)) {
             $alertClass = "success";
             $alertMsg = "Скрипт отработал без ошибок. Количество полученных файлов: " . count($receivedExcels);
+            updateClaimsTable();
         } else {
             $alertClass = "warning";
             $alertMsg = "С прошлыми файлами были несоответствия с ассортиментом. Вы выбрали не отправлять их";
@@ -135,7 +137,10 @@ function main(&$alertClass, &$alertMsg, &$warehouseMsg, &$localXmlPath)
         http_response_code(400);
         $alertMsg = $e->getMessage();
     }
-    logMsg("Пользователю высветилось в блоке alert: $alertMsg");
+
+    if (empty($warehouseMsg)) { // Случай когда не пусто - пользователь не увидит, если клацнет "Все равно отправить"
+        logMsg("Пользователю высветилось в блоке alert: $alertMsg");
+    }
 }
 
 /**
@@ -156,6 +161,7 @@ function execDespiteWarning(&$alertClass, &$alertMsg)
             logMsg("Xml отправлен без ошибок");
             $alertMsg = "Скрипт отработал без ошибок";
             $alertClass = "success";
+            updateClaimsTable();
         } else {
             logMsg("Почему-то через Popup форму не получили локальный путь к уже готовому Xml");
             $alertMsg = "Что-то пошло не так. Обратитесь в поддержку";
@@ -348,7 +354,7 @@ function processOldXml(array $receivedExcels): array
 
     $countDeleted = 0; // Используется для логирования количества неподходящих по дате shippment_claim из старого файла
 
-    $roots3Array = $oldXml->getElementsByTagName('shippment_claim');
+    $oldXmlClaims = $oldXml->getElementsByTagName('shippment_claim');
 
     $minRelevantDate = date('Y-m-d', strtotime(MAX_OLD_DATE)); // Все что раньше этой даты не возвращать
 
@@ -357,20 +363,43 @@ function processOldXml(array $receivedExcels): array
         $recipientList[] = $singleReceivedExcel[1];
     }
 
-    foreach ($roots3Array as $singleRoot3) {
-        $root3Date = $singleRoot3->getAttribute('date');
-        $root3Recipient = $singleRoot3->getAttribute('recipient');
-        if ($root3Date > $minRelevantDate) { // Здесь убираем все, которые меньше даты
+    // Одновременно с обработкой старого Xml обновим наш список со всеми shipment claim
+
+    $allClaims = []; // Массив каждый элемент которого относится к конкретному shipment claim с ключами: date, recipient, productCount
+
+    // Обработка старого Xml
+
+    foreach ($oldXmlClaims as $oldXmlClaim) {
+
+        // Получение значений
+
+        $claimProductCount = $oldXmlClaim->getElementsByTagName('product')->length; // Количество товаров внутри
+        $claimDate = $oldXmlClaim->getAttribute('date');
+        $claimRecipient = $oldXmlClaim->getAttribute('recipient');
+
+        // Обновление списка со всеми shipment claim
+
+        $allClaims[] = ['date' => $claimDate, 'recipient' => $claimRecipient, 'productCount' => $claimProductCount];
+
+        // Формирование массива для нового Xml только с нужными shipment claim
+
+        if ($claimDate > $minRelevantDate) { // Здесь убираем все, которые меньше даты
             // Убираем, если на эту же дату и склад в прошлом XML была запись
-            if (!($root3Date == $_POST['date'] && in_array($root3Recipient, $recipientList))) {
-                $returnArray[] = $singleRoot3;
+            if (!($claimDate == $_POST['date'] && in_array($claimRecipient, $recipientList))) {
+                $returnArray[] = $oldXmlClaim;
                 continue;
             }
         }
         $countDeleted++; // Сюда добираемся всегда, когда не добрались до строки с добавлением в массив
     }
 
-    logMsg("Из старого файла удалено: $countDeleted");
+    // Сохранение актуального списка со всеми shipment claim
+
+    saveAllClaims($allClaims);
+
+    // Завершение работы функции
+
+    logMsg("Из старого файла не использовано: $countDeleted");
     return $returnArray;
 }
 
@@ -494,10 +523,10 @@ function excelToXmlNode(string $fileName, string $recipient, DOMDocument &$dom, 
     // Логирование проблемных Sku
 
     if (!empty($notFoundSkus)) {
-        logMsg("В экселе были Sku не найденные в файле ассортимента: " . implode($notFoundSkus, ", "));
+        logMsg("В экселе $fileName были Sku не найденные в файле ассортимента: " . implode($notFoundSkus, ", "));
     }
     if (!empty($notLeftSkus)) {
-        logMsg("В экселе были Sku в ассортименте у которых кол-во стоит 0: " . implode($notLeftSkus, ", "));
+        logMsg("В экселе $fileName были Sku в ассортименте у которых кол-во стоит 0: " . implode($notLeftSkus, ", "));
     }
 
 
@@ -583,6 +612,69 @@ function connectToFtp()
     ftp_pasv($ftp, true);
 
     return $ftp;
+}
+
+/**
+ * Обновляет файл со всеми актуальными shipment claim с фтп
+ *
+ * @return void
+ *
+ * @throws ErrorException
+ */
+function updateClaimsTable(): void
+{
+    // Адрес куда временно запишем актуальный Xml
+
+    $localFilePathToOldXml = sys_get_temp_dir() . DIRECTORY_SEPARATOR . OLD_XML_FILENAME;
+
+    // Скачиваем актуальный Xml с фтп
+
+    getFileFromFtp(RESULT_FILENAME, $localFilePathToOldXml);
+
+    // Получаем DOMDocument из файла
+
+    $xml = new DOMDocument();
+    $xml->load($localFilePathToOldXml);
+
+    // Получаем DomNodeList со всеми shipment claim
+
+    $xmlClaims = $xml->getElementsByTagName('shippment_claim');
+
+    // Формируем массив со всеми shipment claim
+
+    $allClaims = []; // Массив каждый элемент которого относится к конкретному shipment claim с ключами: date, recipient, productCount
+
+    foreach ($xmlClaims as $xmlClaim) {
+        $claimDate = $xmlClaim->getAttribute('date');
+        $claimRecipient = $xmlClaim->getAttribute('recipient');
+        $claimProductCount = $xmlClaim->getElementsByTagName('product')->length;
+
+        $allClaims[] = ['date' => $claimDate, 'recipient' => $claimRecipient, 'productCount' => $claimProductCount];
+    }
+
+    saveAllClaims($allClaims);
+}
+
+/**
+ * Сохраняет массив с актуальными shipment claim в файл
+ *
+ * @param array $allClaims Массив каждый элемент которого относится к конкретному shipment claim с ключами: date, recipient, productCount
+ *
+ * @return void
+ */
+function saveAllClaims(array $allClaims)
+{
+    // Проверяет создана ли соответствующая папка. Создает, если не существует
+
+    if (!is_dir(GEN_FOLDER)) {
+        mkdir(GEN_FOLDER, 0777, true);
+    }
+
+    // Сохраняем массив в файл
+
+    file_put_contents(ALL_CLAIMS_COPY_PATH, serialize($allClaims));
+
+    logMsg("Все актуальные Claims (" . count($allClaims) . " шт.) сериализованы в файле: " . ALL_CLAIMS_COPY_PATH);
 }
 
 /**
