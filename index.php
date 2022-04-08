@@ -15,15 +15,20 @@ const RECIPIENT_SPB = 'ozon_spb';   // Используется в XML (в 'clai
 const FILENAME_MSK = 'mskFile';
 const RECIPIENT_MSK = 'ozon_msk';
 
+const WAREHOUSE_PRICE_LIST_FILE = 'candy_pricing.xml'; // Название файла с ценами и количеством на фтп
+
 const RESULT_FILENAME = 'candy_order_xml_test.xml'; // С таким именем файл зальется на ФТП #TODO убрать 'test_'
 const MAX_OLD_DATE = '-14 days'; // Используется в функции strtotime. Максимальное количество дней для хранения 'shippment_claim'
 
 const OLD_XML_FILENAME = 'old_' . RESULT_FILENAME;  // Произвольное имя временного файла (прошлый xml файл с ФТП)
 const TEMP_ROOT_ELEMENT = 'temp';                   // Произвольное имя элемента временного файла
+const GEN_FOLDER = 'gen';                           // Произвольное имя папки, где будем хранить сгенерированные файлы
 
-$alert = false;
-$alertClass = 'danger';
-$msg = "";
+$alertClass = "danger";     // Цвет блока alert
+$alertMsg = "";             // Содержание блока alert
+
+$warehouseMsg = "";         // Содержание для сообщения в Popup-окне в случае несоответствия с ассортиментом
+$localXmlPath = "";         // Адрес где будет храниться созданный файл для передачи на фтп
 
 $minDate = new DateTime();
 $modifyDays = 1;
@@ -31,10 +36,36 @@ if (date("H") > 15 || (date("H") == 15 && date("i") > 30)) {
     $modifyDays = 2;
 }
 
-if (isset($_POST['submit'])) {
+// ---------------------------------------------- Отправлена форма
 
-    logStartMessage(); // Логирует старт работы с присланными данными
+if (isset($_POST['submit-hard'])) {     // Форма из Popup-окна с подтверждением отправки файла несмотря на несоответствия с ассортиментом
 
+    logMsg("В форме Popup окна решили отправить Xml несмотря на несоответствия с ассортиментом");
+
+    preSettings(); // Выполнение преднастроек скрипта
+
+    execDespiteWarning($alertClass, $alertMsg); // Загрузить уже готовый с прошлого раза Xml
+
+} elseif (isset($_POST['submit'])) {    // Основная форма
+
+    logStartMsg(); // Логирует старт работы с присланными данными
+
+    preSettings(); // Выполнение преднастроек скрипта
+
+    main($alertClass, $alertMsg, $warehouseMsg, $localXmlPath); // Вызов главной функции
+}
+
+// ---------------------------------------------- Функции
+
+/**
+ * Выполнение преднастроек скрипта
+ *
+ * @return void
+ *
+ * @throws ErrorException
+ */
+function preSettings(): void
+{
 // Из файла .env берем значения для FTP соединения
 
     $dotenv = Dotenv::createImmutable(__DIR__);
@@ -49,25 +80,22 @@ if (isset($_POST['submit'])) {
     set_error_handler(function ($err_severity, $err_msg, $err_file, $err_line, array $err_context) {
         throw new ErrorException($err_msg, 0, $err_severity, $err_file, $err_line);
     }, E_WARNING);
-
-// Вызов главной функции
-
-    main($alert, $alertClass, $msg);
 }
-
-// ---------------------------------------------- Функции
 
 /**
  * Главная функция
  *
  * @return void
  */
-function main(&$alert, &$alertClass, &$msg)
+function main(&$alertClass, &$alertMsg, &$warehouseMsg, &$localXmlPath)
 {
     try {
+        // Адрес где будет храниться временный созданный файл Xml для передачи на фтп
+        $localXmlPath = sys_get_temp_dir() . DIRECTORY_SEPARATOR . RESULT_FILENAME;
+
         // Проверки на отсутствие присланных данных
         if (!$_POST["date"]) {
-            throw new Exception("не указана дата отгрузки не прислана");
+            throw new Exception("Не указана дата отгрузки");
         }
 
         if ((!isset($_FILES[FILENAME_SPB]) || 0 == $_FILES[FILENAME_SPB][FIELD_NAME_SIZE]) &&
@@ -88,29 +116,62 @@ function main(&$alert, &$alertClass, &$msg)
         }
 
         if (!empty($receivedExcels)) {
-            processData($receivedExcels);
+            processData($receivedExcels, $localXmlPath, $warehouseMsg);
         }
 
-        $msg = "Скрипт отработал без ошибок. Количество полученных файлов: " . count($receivedExcels);
-        $alertClass = 'success';
-        $alert = true;
+        if (empty($warehouseMsg)) {
+            $alertClass = "success";
+            $alertMsg = "Скрипт отработал без ошибок. Количество полученных файлов: " . count($receivedExcels);
+        } else {
+            $alertClass = "warning";
+            $alertMsg = "С прошлыми файлами были несоответствия с ассортиментом. Вы выбрали не отправлять их";
+        }
 
     } catch (DOMException|PhpSpreadsheetException $e) {
-        logMessage($e->getMessage());
+        logMsg($e->getMessage());
         http_response_code(400);
-        $msg = "Прислана таблица с несоответствующим содержанием";
+        $alertMsg = "Прислана таблица с несоответствующим содержанием";
     } catch (Exception $e) {
         http_response_code(400);
-        $msg = $e->getMessage();
+        $alertMsg = $e->getMessage();
     }
+    logMsg("Пользователю высветилось в блоке alert: $alertMsg");
+}
 
-    logMessage($msg);
+/**
+ * Загрузить на фтп уже готовый Xml
+ *
+ * Вызывается после первичной отработки скрипта, уже с готовой ссылкой на Xml (из Post берется)
+ *
+ * @param $alertClass
+ * @param $alertMsg
+ *
+ * @return void
+ */
+function execDespiteWarning(&$alertClass, &$alertMsg)
+{
+    try {
+        if (isset($_POST["readyXml"])) {
+            uploadToFtp(RESULT_FILENAME, $_POST["readyXml"]);
+            logMsg("Xml отправлен без ошибок");
+            $alertMsg = "Скрипт отработал без ошибок";
+            $alertClass = "success";
+        } else {
+            logMsg("Почему-то через Popup форму не получили локальный путь к уже готовому Xml");
+            $alertMsg = "Что-то пошло не так. Обратитесь в поддержку";
+        }
+    } catch (Exception $e) {
+        http_response_code(400);
+        $alertMsg = $e->getMessage();
+    }
 }
 
 /**
  * Обрабатывает таблицы, формирует xml, заливает на FTP
  *
  * @param array $receivedExcels Массив, каждый элемент которого содержит [$fileName, $recipient] (имя файла в POST и claim_id)
+ * @param string $localXmlPath Адрес где будет храниться созданный файл для передачи на фтп
+ * @param string $warehouseMsg Уведомляет о несоответствии с файлом ассортимента
  *
  * @return void
  *
@@ -118,18 +179,19 @@ function main(&$alert, &$alertClass, &$msg)
  * @throws PhpSpreadsheetException
  * @throws Exception Тут должны быть только исключения только явно вызванные в коде
  */
-function processData(array $receivedExcels)
+function processData(array $receivedExcels, string &$localXmlPath, string &$warehouseMsg)
 {
-    // Адрес где будет храниться временный созданный файл для передачи на фтп
-    $localFilePath = sys_get_temp_dir() . DIRECTORY_SEPARATOR . RESULT_FILENAME;
-
-    $allClaims = getAllClaims($receivedExcels); // Получение искомого массива из экселя и старого Xml
+    // Получение искомого массива из экселя и старого Xml
+    $allClaims = getAllClaims($receivedExcels, $warehouseMsg);
 
     // Создание xml файла в указанном пути
-    createXml($allClaims, $localFilePath);
+    createXml($allClaims, $localXmlPath);
 
-    // Отправка файла на FTP сервер
-    uploadToFtp(RESULT_FILENAME, $localFilePath);
+    // Отправка файла на FTP сервер на этом этапе, только когда не было противоречий с файлом ассортимента
+    if (empty($warehouseMsg)) {
+        uploadToFtp(RESULT_FILENAME, $localXmlPath);
+    }
+
 }
 
 /**
@@ -138,6 +200,7 @@ function processData(array $receivedExcels)
  * Использует при создании Excel таблицы из Post и старый Xml с фтп-сервера
  *
  * @param array $receivedExcels Массив, каждый элемент которого содержит [$fileName, $recipient] (имя файла в POST и claim_id)
+ * @param string $warehouseMsg Уведомляет о несоответствии с файлом ассортимента
  *
  * @return DOMNode[]
  *
@@ -145,7 +208,7 @@ function processData(array $receivedExcels)
  * @throws ErrorException
  * @throws PhpSpreadsheetException
  */
-function getAllClaims(array $receivedExcels): array
+function getAllClaims(array $receivedExcels, string &$warehouseMsg): array
 {
     // Создание временного объекта для хранения содержимого будущего XML-файла с 'shippment_claim' без необходимых родительских категорий
 
@@ -161,7 +224,7 @@ function getAllClaims(array $receivedExcels): array
 
     $shipmentClaimsExcels = []; // Сюда будем складывать из экселя
     foreach ($receivedExcels as $singleExcel) { // Добавляем один 'shippment_claim' для каждого загруженного экселя
-        $shipmentClaimsExcels[] = excelToXmlNode($singleExcel[0], $singleExcel[1], $tempDom);
+        $shipmentClaimsExcels[] = excelToXmlNode($singleExcel[0], $singleExcel[1], $tempDom, $warehouseMsg);
     }
 
     // Получение массива 'shippment_claim' из предыдущего Xml файла с фтп-сервера
@@ -201,13 +264,13 @@ function getAllClaims(array $receivedExcels): array
  * Создает XML-файл по указанному пути
  *
  * @param array $allClaims Массив со всеми отсортированными и отобранными 'shippment_claim' в виде нодов (Nodes) из временного DOMDocument
- * @param string $localFilePath Путь куда сохранить созданный файл
+ * @param string $localXmlPath Путь куда сохранить созданный файл
  *
  * @return void
  *
  * @throws DOMException
  */
-function createXml(array $allClaims, string $localFilePath): void
+function createXml(array $allClaims, string $localXmlPath): void
 {
     $currentTime = new DateTime(); // Получение текущего времени
 
@@ -253,7 +316,7 @@ function createXml(array $allClaims, string $localFilePath): void
 
     // Сохранение файла во временную папку
 
-    $dom->save($localFilePath);
+    $dom->save($localXmlPath);
 }
 
 /**
@@ -268,17 +331,15 @@ function createXml(array $allClaims, string $localFilePath): void
 function processOldXml(array $receivedExcels): array
 {
     // Выкачиваем файл с фтп
-
-    $oldXmlFilePath = getXmlFromFtp();
-
-    if (empty($oldXmlFilePath)) {
+    $localFilePathToOldXml = sys_get_temp_dir() . DIRECTORY_SEPARATOR . OLD_XML_FILENAME; // Адрес куда временно запишем старый Xml
+    if (!getFileFromFtp(RESULT_FILENAME, $localFilePathToOldXml)) {
         return [];
     }
 
     // Получаем DOMDocument из файла
 
     $oldXml = new DOMDocument();
-    $oldXml->load($oldXmlFilePath);
+    $oldXml->load($localFilePathToOldXml);
 
     // Нам нужно вернуть только те 'shippment_claim', в которых аттрибут дата не позднее определенной даты
     // И если на присланную дату в присланном складе будет в старом Xml запись - ее не возвращать
@@ -309,7 +370,7 @@ function processOldXml(array $receivedExcels): array
         $countDeleted++; // Сюда добираемся всегда, когда не добрались до строки с добавлением в массив
     }
 
-    logMessage("Из старого файла удалено: $countDeleted");
+    logMsg("Из старого файла удалено: $countDeleted");
     return $returnArray;
 }
 
@@ -319,15 +380,50 @@ function processOldXml(array $receivedExcels): array
  * @param string $fileName Имя файла с таблицей из тела Post-запроса
  * @param string $recipient Используется в XML (в 'claim_id')
  * @param DOMDocument $dom Содержимое формируемого нашего нового XML файла
+ * @param string $warehouseMsg Уведомляет о несоответствии с файлом ассортимента
  *
  * @return DOMElement
  *
  * @throws DOMException
+ * @throws ErrorException
  * @throws PhpSpreadsheetException
  */
-function excelToXmlNode(string $fileName, string $recipient, DOMDocument &$dom): DOMElement
+function excelToXmlNode(string $fileName, string $recipient, DOMDocument &$dom, string &$warehouseMsg): DOMElement
 {
     $date = $_POST['date']; // Полученная дата отгрузки
+
+    // Выкачиваем файл с наличием товаров с фтп
+
+    $localFilePathToPriceList = sys_get_temp_dir() . DIRECTORY_SEPARATOR . WAREHOUSE_PRICE_LIST_FILE; // Адрес куда временно запишем прайслист
+
+    if (getFileFromFtp(WAREHOUSE_PRICE_LIST_FILE, $localFilePathToPriceList)) {
+        $warehouseMsg = $warehouseMsg . 'Файл на фтп с прайс-листом отсутствует. Нет возможности перепроверить наличие';
+    }
+
+    // Получаем DOMDocument из файла
+
+    $priceListDom = new DOMDocument();
+    $priceListDom->load($localFilePathToPriceList);
+
+    // Получаем DomNodeList со всеми товарами со склада (содержит наличие, цены и т.д.)
+
+    $warehouseOffers = $priceListDom->getElementsByTagName('offer');
+
+    // Делаем ассоциативный массив с SKU и количеством товара
+
+    $stock = [];
+
+    foreach ($warehouseOffers as $offer) {
+        $offerSku = $offer->getAttribute('xmlId');
+        if (array_key_exists($offerSku, $stock)) { // Проверка на случай ошибки в файле на фтп
+            logMsg("В файле склада (" . WAREHOUSE_PRICE_LIST_FILE . ") повторяется sku: $offerSku");
+        }
+        $stock[$offerSku] = $offer->getAttribute('stock_mow');
+    }
+
+    // Массив с Sku проблемных товаров из экселя:
+    $notFoundSkus = []; // Такие же Sku не найдены в скачанной таблице ассортимента
+    $notLeftSkus = [];  // Количество в ассортименте было 0
 
     // Обработка полученной Excel таблицы
 
@@ -361,61 +457,87 @@ function excelToXmlNode(string $fileName, string $recipient, DOMDocument &$dom):
 
         // Обработка ячейки из столбца 1
 
-        $columnA = $cellIterator->seek('A'); // Выбираем столбец 1-ый
+        $columnA = $cellIterator->seek('A'); // Выбираем столбец 1-ый (содержит Sku)
         $cellA = $columnA->current();
-        $attrProductSku = new DOMAttr('sku', $cellA->getValue());
+        $productSku = $cellA->getValue();
+        $attrProductSku = new DOMAttr('sku', $productSku);
         $product->setAttributeNode($attrProductSku);
 
         // Обработка ячейки из столбца 2
 
-        $columnB = $cellIterator->seek('B'); // Выбираем столбец 2-ой
+        $columnB = $cellIterator->seek('B'); // Выбираем столбец 2-ой (содержит Qty)
         $cellB = $columnB->current();
-        $attrProductQty = new DOMAttr('qty', $cellB->getValue());
+        $productQty = $cellB->getValue();
+        $attrProductQty = new DOMAttr('qty', $productQty);
         $product->setAttributeNode($attrProductQty);
 
         // Вкладываем товар в самый нижний элемент XML
 
         $root3->appendChild($product);
+
+        // Проверка на соответствие с файлом ассортимента
+
+        if (!array_key_exists($productSku, $stock)) {
+            $notFoundSkus[] = $productSku;
+        } elseif (0 == $stock[$productSku]) {
+            $notLeftSkus[] = $productSku;
+        }
     }
+
+    // Предупреждение, если были найдены Sku в экселе ненайденные в ассортименте или с количеством 0 в ассортименте
+
+    $badSkus = array_merge($notFoundSkus, $notLeftSkus);
+    if (!empty($badSkus)) {
+        $warehouseMsg = "Нет в наличии товаров с sku: " . implode($badSkus, ", ");
+    }
+
+    // Логирование проблемных Sku
+
+    if (!empty($notFoundSkus)) {
+        logMsg("В экселе были Sku не найденные в файле ассортимента: " . implode($notFoundSkus, ", "));
+    }
+    if (!empty($notLeftSkus)) {
+        logMsg("В экселе были Sku в ассортименте у которых кол-во стоит 0: " . implode($notLeftSkus, ", "));
+    }
+
 
     return $root3;
 }
 
 /**
- * Выкачивает с фтп старый XML файл. Возвращает ссылку на скаченный файл, или пусто в случае если не было файла на фтп
+ * Выкачивает файл с фтп
  *
- * @return string Путь к скаченному предыдущему XML
+ * @param string $remoteFilepath Путь куда сохраняем
+ * @param string $localFilepath Путь к файлу на нашем сервере
+ *
+ * @return bool
  *
  * @throws ErrorException Выбрасывается вместо Warning - значит ошибка соединения с ftp
  * @throws Exception
  */
-function getXmlFromFtp(): string
+function getFileFromFtp(string $remoteFilepath, string $localFilepath): bool
 {
-    $localFilePathToOldXml = sys_get_temp_dir() . DIRECTORY_SEPARATOR . OLD_XML_FILENAME;
-
     $ftp = connectToFtp();
 
     $listOfFilesOnServer = ftp_nlist($ftp, '');
 
     if (!in_array(RESULT_FILENAME, $listOfFilesOnServer)) {
-        logMessage('На фтп не было файла с именем: ' . RESULT_FILENAME);
-        return '';
+        logMsg("На фтп не было такого файла: $remoteFilepath");
+        return false;
     }
 
-    if (!ftp_get($ftp, $localFilePathToOldXml, RESULT_FILENAME, FTP_ASCII)) { // загрузка файла
-        throw new Exception('Не удалось скачать с фтп файл: ' . RESULT_FILENAME);
+    if (!ftp_get($ftp, $localFilepath, $remoteFilepath, FTP_ASCII)) {
+        throw new Exception("Не удалось скачать с фтп существующий файл: $remoteFilepath");
     }
 
-    ftp_close($ftp); // закрытие соединения
+    ftp_close($ftp);
 
-    logMessage('Успешно скачали с фтп файл с именем: ' . RESULT_FILENAME);
-    return $localFilePathToOldXml;
+    logMsg("Успешно скачали с фтп файл: $remoteFilepath");
+    return true;
 }
 
 /**
- * Отправляет сформированный xml на FTP сервер
- *
- * Перезаписывает, если файл уже существует на FTP
+ * Отправляет файл на FTP сервер (перезаписывает, если с таким именем уже существует на FTP)
  *
  * @param string $newFileName Этим именем будет называться файл залитый на ftp
  * @param string $localFilePath Путь к существующему файлу для отправки
@@ -433,7 +555,9 @@ function uploadToFtp(string $newFileName, string $localFilePath)
         throw new Exception("Не удалось загрузить $newFileName на сервер");
     }
 
-    ftp_close($ftp); // закрытие соединения
+    ftp_close($ftp);
+
+    logMsg("Успешно залили файл $localFilePath на фтп под именем: $newFileName");
 }
 
 /**
@@ -462,11 +586,40 @@ function connectToFtp()
 }
 
 /**
+ * Перемещает файл в папку для хранения (не очищается каждую сессию)
+ *
+ * @param string $tempFilePath Старый путь к файлу
+ * @param string $newFileName Имя файла, под которым будет храниться
+ *
+ * @return string Новый путь к файлу
+ */
+function moveToGenFolder(string $tempFilePath, string $newFileName): string
+{
+    if (!file_exists($tempFilePath)) {
+        logMsg("Была попытка переместить несуществующий файл: $tempFilePath");
+        return '';
+    }
+
+    if (!is_dir(GEN_FOLDER)) { // Проверяет создана ли соответствующая папка. Создает, если не существует
+        mkdir(GEN_FOLDER, 0777, true);
+    }
+    $newFilePath = __DIR__ . DIRECTORY_SEPARATOR . GEN_FOLDER . DIRECTORY_SEPARATOR . $newFileName;
+    if (!rename($tempFilePath, $newFilePath)) {
+        logMsg("Несмотря на то, что файл: $tempFilePath существует, не удалось переместить в $newFilePath");
+        return ''; // В случае если не удалось переместить. Например, файла не существовало по старому пути
+    }
+
+    logMsg("Переместили файл: $tempFilePath в $newFilePath");
+
+    return $newFilePath;
+}
+
+/**
  * Логирует старт работы. Пишет в лог все что прислали из формы
  *
  * @return void
  */
-function logStartMessage(): void
+function logStartMsg(): void
 {
     $string = str_repeat("-", 50) . PHP_EOL . "Были присланы данные:";
 
@@ -478,7 +631,7 @@ function logStartMessage(): void
         $string = $string . PHP_EOL . $key . " ||| название файла: " . $sentFile["name"] . " ||| Размер: " . $sentFile["size"];
     }
 
-    logMessage($string);
+    logMsg($string);
 }
 
 
@@ -489,11 +642,11 @@ function logStartMessage(): void
  *
  * @return void
  */
-function logMessage(string $logString): void
+function logMsg(string $logString): void
 {
     $logFolder = LOG_FOLDER_ROOT . DIRECTORY_SEPARATOR . date('Y') . DIRECTORY_SEPARATOR . date('m');
 
-    if (!is_dir($logFolder)) { // Проверяет создана ли соответствующая папка для лога. Создает, если не существует
+    if (!is_dir($logFolder)) { // Проверяет создана ли соответствующая папка. Создает, если не существует
         mkdir($logFolder, 0777, true);
     }
 
@@ -503,52 +656,6 @@ function logMessage(string $logString): void
     file_put_contents($logFileAddress, $logString, FILE_APPEND);
 }
 
-?>
+include 'upload-form.php'; // Html Форма
 
-<!doctype html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport"
-          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
-    <meta http-equiv="X-UA-Compatible" content="ie=edge">
-    <title>Excel2Xml</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.1/dist/css/bootstrap.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.slim.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.1/dist/js/bootstrap.bundle.min.js"></script>
-</head>
-<body>
-<div class="container">
-    <?php if ($alert): ?>
-        <div id="alert" class="alert alert-<?php echo $alertClass ?>">
-            <?php echo $msg ?>
-        </div>
-    <?php endif; ?>
-    <form action="" method="post" class="was-validated" enctype="multipart/form-data">
-        <div class="form-group">
-            <label for="date">Дата планируемой отгрузки:</label>
-            <input type="date" min="<?php echo $minDate->modify("+ {$modifyDays} days")->format("Y-m-d") ?>"
-                   class="form-control" id="date" placeholder="Выберите дату отгрузки" name="date" required>
-            <div class="invalid-feedback">Обязательно для заполнения.</div>
-        </div>
-        <div class="form-group">
-            <label for="pwd">Эксель Питер:</label>
-            <input type="file" class="form-control" id="<?php echo FILENAME_SPB ?>" placeholder="Выберите файл"
-                   name="<?php echo FILENAME_SPB ?>">
-        </div>
-        <div class="form-group">
-            <label for="pwd">Эксель Москва:</label>
-            <input type="file" class="form-control" id="<?php echo FILENAME_MSK ?>" placeholder="Выберите файл"
-                   name="<?php echo FILENAME_MSK ?>">
-        </div>
-        <button type="submit" name="submit" class="btn btn-primary">Отправить</button>
-    </form>
-</div>
-<script>
-    $("#date").on('change', function () {
-        $("#alert").hide();
-    })
-</script>
-</body>
-</html>
+?>
