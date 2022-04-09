@@ -6,9 +6,6 @@ use Dotenv\Dotenv;
 use PhpOffice\PhpSpreadsheet\Exception as PhpSpreadsheetException;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 
-const LOG_FOLDER_ROOT = 'log';      // Название папки для хранения логов
-const FIELD_NAME_SIZE = 'size';     // Поле содержащий размер присланного файла
-
 const FILENAME_SPB = 'spbFile';     // Наименование файла в теле POST
 const RECIPIENT_SPB = 'ozon_spb';   // Используется в XML (в 'claim_id')
 
@@ -16,16 +13,36 @@ const FILENAME_MSK = 'mskFile';
 const RECIPIENT_MSK = 'ozon_msk';
 
 const REFRESH_CLAIMS_TABLE_TIME = 2 * 60 * 60; // Через сколько времени считать таблицу неактуальной и пересоздать данные для нее
-
-const WAREHOUSE_PRICE_LIST_FILE = 'candy_pricing.xml'; // Название файла с ценами и количеством на фтп
-
-const RESULT_FILENAME = 'candy_order_xml_test.xml'; // С таким именем файл зальется на ФТП #TODO убрать 'test_'
 const MAX_OLD_DATE = '-14 days'; // Используется в функции strtotime. Максимальное количество дней для хранения 'shippment_claim'
 
+const RESULT_FILENAME = 'candy_order_xml_test.xml'; // С таким именем файл зальется на ФТП #TODO убрать 'test_'
+const WAREHOUSE_PRICE_LIST_FILE = 'candy_pricing.xml'; // Название файла с ценами и количеством на фтп
+
+const LOG_FOLDER_ROOT = 'log';                      // Произвольное имя папки для хранения логов
+const GEN_FOLDER = 'gen';                           // Произвольное имя папки, где будем хранить сгенерированные файлы
 const OLD_XML_FILENAME = 'old_' . RESULT_FILENAME;  // Произвольное имя временного файла (прошлый xml файл с ФТП)
 const TEMP_ROOT_ELEMENT = 'temp';                   // Произвольное имя элемента временного файла
-const GEN_FOLDER = 'gen';                           // Произвольное имя папки, где будем хранить сгенерированные файлы
+//Путь к сгенерированному файлу с массивом всех актуальных Shipment Claims
 const ALL_CLAIMS_COPY_PATH = __DIR__ . DIRECTORY_SEPARATOR . GEN_FOLDER . DIRECTORY_SEPARATOR . 'all_claims.txt';
+
+const FILES_SIZE_KEY = 'size';     // Поле содержащий размер присланного файла
+
+const POST_DATE = 'date';
+const POST_SUBMIT = 'submit';
+const POST_SUBMIT_HARD = 'submit-hard';
+const POST_READY_XML = 'readyXml';
+const POST_DELETE = 'delete';
+const POST_DELETE_DATE = 'deleteDate';
+const POST_DELETE_RECIPIENT = 'deleteRecipient';
+
+const XML_DATE = 'date';
+const XML_RECIPIENT = 'recipient';
+const XML_PRODUCT = 'product';
+const XML_CLAIM = 'shippment_claim';
+
+const KEY_ALL_CLAIMS_DATE = 'date';
+const KEY_ALL_CLAIMS_RECIPIENT = 'recipient';
+const KEY_ALL_CLAIMS_PROD_COUNT = 'productCount';
 
 $alertClass = "danger";     // Цвет блока alert
 $alertMsg = "";             // Содержание блока alert
@@ -45,19 +62,19 @@ preSettings();
 
 // ---------------------------------------------- Отправлена форма
 
-if (isset($_POST['submit-hard'])) {     // Форма из Popup-окна с подтверждением отправки файла несмотря на несоответствия с ассортиментом
+if (isset($_POST[POST_SUBMIT_HARD])) {     // Форма из Popup-окна с подтверждением отправки файла несмотря на несоответствия с ассортиментом
 
     logMsg("В форме Popup окна решили отправить Xml несмотря на несоответствия с ассортиментом");
 
     execDespiteWarning($alertClass, $alertMsg); // Загрузить уже готовый с прошлого раза Xml
 
-} elseif (isset($_POST['delete'])) {    // Кнопка удаления
+} elseif (isset($_POST[POST_DELETE])) {    // Кнопка удаления
 
     logStartDelete(); // Логирует старт работы с присланными данными
 
     deleteMain($alertClass, $alertMsg); // Вызов главной функции
 
-} elseif (isset($_POST['submit'])) {    // Основная форма
+} elseif (isset($_POST[POST_SUBMIT])) {    // Основная форма
 
     logStartMain(); // Логирует старт работы с присланными данными
 
@@ -136,12 +153,12 @@ function main(&$alertClass, &$alertMsg, &$warehouseMsg, &$localXmlPath)
         $localXmlPath = sys_get_temp_dir() . DIRECTORY_SEPARATOR . RESULT_FILENAME;
 
         // Проверки на отсутствие присланных данных
-        if (!$_POST["date"]) {
+        if (!$_POST[POST_DATE]) {
             throw new Exception("Не указана дата отгрузки");
         }
 
-        if ((!isset($_FILES[FILENAME_SPB]) || 0 == $_FILES[FILENAME_SPB][FIELD_NAME_SIZE]) &&
-            (!isset($_FILES[FILENAME_MSK]) || 0 == $_FILES[FILENAME_MSK][FIELD_NAME_SIZE])) {
+        if ((!isset($_FILES[FILENAME_SPB]) || 0 == $_FILES[FILENAME_SPB][FILES_SIZE_KEY]) &&
+            (!isset($_FILES[FILENAME_MSK]) || 0 == $_FILES[FILENAME_MSK][FILES_SIZE_KEY])) {
             throw new Exception("Ни одна таблица не прислана");
         }
 
@@ -149,11 +166,11 @@ function main(&$alertClass, &$alertMsg, &$warehouseMsg, &$localXmlPath)
 
         $receivedExcels = [];
 
-        if (isset($_FILES[FILENAME_SPB]) && $_FILES[FILENAME_SPB][FIELD_NAME_SIZE] > 0) {
+        if (isset($_FILES[FILENAME_SPB]) && $_FILES[FILENAME_SPB][FILES_SIZE_KEY] > 0) {
             $receivedExcels[] = [FILENAME_SPB, RECIPIENT_SPB];
         }
 
-        if (isset($_FILES[FILENAME_MSK]) && $_FILES[FILENAME_MSK][FIELD_NAME_SIZE] > 0) {
+        if (isset($_FILES[FILENAME_MSK]) && $_FILES[FILENAME_MSK][FILES_SIZE_KEY] > 0) {
             $receivedExcels[] = [FILENAME_MSK, RECIPIENT_MSK];
         }
 
@@ -197,8 +214,8 @@ function main(&$alertClass, &$alertMsg, &$warehouseMsg, &$localXmlPath)
 function execDespiteWarning(&$alertClass, &$alertMsg)
 {
     try {
-        if (isset($_POST["readyXml"])) {
-            uploadToFtp(RESULT_FILENAME, $_POST["readyXml"]);
+        if (isset($_POST[POST_READY_XML])) {
+            uploadToFtp(RESULT_FILENAME, $_POST[POST_READY_XML]);
             logMsg("Xml отправлен без ошибок");
             $alertMsg = "Скрипт отработал без ошибок";
             $alertClass = "success";
@@ -292,14 +309,14 @@ function getAllClaimsAsNodes(array $receivedExcels, string &$warehouseMsg): arra
 
     // Собираем в массив все элементы 'shippment_claim' (тут уже из экселей и Xml) как DomNodeList
     $xpath = new DOMXpath($tempDom);
-    $tempNodeList = $xpath->evaluate('/' . TEMP_ROOT_ELEMENT . '/shippment_claim');
+    $tempNodeList = $xpath->evaluate(sprintf('/%s/%s', TEMP_ROOT_ELEMENT, XML_CLAIM));
 
     // Переводит наш DomNodeList в обычный массив
     $tempClaims = iterator_to_array($tempNodeList);
 
     // Сортируем наш массив (сортируем 'date' как обычную строку, т.к. формат одинаковый и подходящий: 'yyyy-mm-dd')
     usort($tempClaims, static function ($a, $b) {
-        return strcasecmp($a->getAttribute('date'), $b->getAttribute('date'));
+        return strcasecmp($a->getAttribute(XML_DATE), $b->getAttribute(XML_DATE));
     }
     );
 
@@ -307,7 +324,7 @@ function getAllClaimsAsNodes(array $receivedExcels, string &$warehouseMsg): arra
 }
 
 /**
- * Создает XML-файл по указанному пути
+ * Создает готовый XML-файл для выгрузки по указанному локальному пути
  *
  * @param array $allClaimsAsNodes Массив со всеми отсортированными и отобранными 'shippment_claim' в виде нодов (Nodes) из временного DOMDocument
  * @param string $localXmlPath Путь куда сохранить созданный файл
@@ -394,7 +411,7 @@ function processOldXml(array $receivedExcels): array
 
     $countDeleted = 0; // Используется для логирования количества неподходящих по дате shippment_claim из старого файла
 
-    $oldXmlClaims = $oldXml->getElementsByTagName('shippment_claim');
+    $oldXmlClaims = $oldXml->getElementsByTagName(XML_CLAIM);
 
     $minRelevantDate = date('Y-m-d', strtotime(MAX_OLD_DATE)); // Все что раньше этой даты не возвращать
 
@@ -413,19 +430,19 @@ function processOldXml(array $receivedExcels): array
 
         // Получение значений
 
-        $claimProductCount = $oldXmlClaim->getElementsByTagName('product')->length; // Количество товаров внутри
-        $claimDate = $oldXmlClaim->getAttribute('date');
-        $claimRecipient = $oldXmlClaim->getAttribute('recipient');
+        $claimProductCount = $oldXmlClaim->getElementsByTagName(XML_PRODUCT)->length; // Количество товаров внутри
+        $claimDate = $oldXmlClaim->getAttribute(XML_DATE);
+        $claimRecipient = $oldXmlClaim->getAttribute(XML_RECIPIENT);
 
         // Обновление списка со всеми shipment claim
 
-        $allClaims[] = ['date' => $claimDate, 'recipient' => $claimRecipient, 'productCount' => $claimProductCount];
+        $allClaims[] = [KEY_ALL_CLAIMS_DATE => $claimDate, KEY_ALL_CLAIMS_RECIPIENT => $claimRecipient, KEY_ALL_CLAIMS_PROD_COUNT => $claimProductCount];
 
         // Формирование массива для нового Xml только с нужными shipment claim
 
         if ($claimDate > $minRelevantDate) { // Здесь убираем все, которые меньше даты
             // Убираем, если на эту же дату и склад в прошлом XML была запись
-            if (!($claimDate == $_POST['date'] && in_array($claimRecipient, $recipientList))) {
+            if (!($claimDate == $_POST[POST_DATE] && in_array($claimRecipient, $recipientList))) {
                 $returnArray[] = $oldXmlClaim;
                 continue;
             }
@@ -459,7 +476,7 @@ function processOldXml(array $receivedExcels): array
  */
 function excelToXmlNode(string $fileName, string $recipient, DOMDocument &$dom, string &$warehouseMsg): DOMElement
 {
-    $date = $_POST['date']; // Полученная дата отгрузки
+    $date = $_POST[POST_DATE]; // Полученная дата отгрузки
 
     // Выкачиваем файл с наличием товаров с фтп
 
@@ -502,13 +519,13 @@ function excelToXmlNode(string $fileName, string $recipient, DOMDocument &$dom, 
     // Создание и привязывание атрибутов к родительскому элементу 3
     // Т.е. 'shippment_claim'. В экселе он будет лишь один
 
-    $root3 = $dom->createElement('shippment_claim');
+    $root3 = $dom->createElement(XML_CLAIM);
 
     $attrRoot3CustomerType = new DOMAttr('customerType', 'customer');
     $root3->setAttributeNode($attrRoot3CustomerType);
-    $attrRoot3Recipient = new DOMAttr('recipient', $recipient);
+    $attrRoot3Recipient = new DOMAttr(XML_RECIPIENT, $recipient);
     $root3->setAttributeNode($attrRoot3Recipient);
-    $attrRoot3Date = new DOMAttr('date', $date);
+    $attrRoot3Date = new DOMAttr(XML_DATE, $date);
     $root3->setAttributeNode($attrRoot3Date);
     $attrRoot3WarehouseId = new DOMAttr('warehouseId', 'candy_D34');
     $root3->setAttributeNode($attrRoot3WarehouseId);
@@ -521,7 +538,7 @@ function excelToXmlNode(string $fileName, string $recipient, DOMDocument &$dom, 
 
     foreach ($worksheet->getRowIterator() as $row) { // Здесь перебираются строки
 
-        $product = $dom->createElement('product'); // Создает элемент с товаром
+        $product = $dom->createElement(XML_PRODUCT); // Создает элемент с товаром
         $cellIterator = $row->getCellIterator(); // Объект для выбора ячейки строки
 
         // Обработка ячейки из столбца 1
@@ -585,8 +602,8 @@ function deleteMain(string &$alertClass, string &$alertMsg)
 {
     try {
         // Проверка, что фронт отработал верно
-        if (!$_POST["deleteDate"] || !$_POST["deleteRecipient"]) {
-            throw new Exception("В Post не было: deleteDate и deleteRecipient");
+        if (!$_POST[POST_DELETE_DATE] || !$_POST[POST_DELETE_RECIPIENT]) {
+            throw new Exception(sprintf("В Post не было: %s и %s", POST_DELETE_DATE, POST_DELETE_RECIPIENT));
         }
 
         // Адрес где будет храниться временный созданный файл Xml для передачи на фтп
@@ -608,7 +625,7 @@ function deleteMain(string &$alertClass, string &$alertMsg)
         // Подготовка вывода сообщения для пользователя
         $alertClass = 'success';
         $alertMsg = sprintf('Успешно удален выбранный shipment claim с date: %s и recipient: %s',
-            $_POST["deleteDate"], $_POST["deleteRecipient"]);
+            $_POST[POST_DELETE_DATE], $_POST[POST_DELETE_RECIPIENT]);
 
         // Обновить таблицу
         updateClaimsTable();
@@ -631,8 +648,8 @@ function deleteMain(string &$alertClass, string &$alertMsg)
 function deleteClaim(array &$allClaimsAsNodes)
 {
     foreach ($allClaimsAsNodes as $key => $claimNode) {
-        if ($_POST["deleteDate"] == $claimNode->getAttribute('date') &&
-            $_POST["deleteRecipient"] == $claimNode->getAttribute('recipient')) {
+        if ($_POST[POST_DELETE_DATE] == $claimNode->getAttribute(XML_DATE) &&
+            $_POST[POST_DELETE_RECIPIENT] == $claimNode->getAttribute(XML_RECIPIENT)) {
             unset($allClaimsAsNodes[$key]);
         }
     }
@@ -698,6 +715,7 @@ function uploadToFtp(string $newFileName, string $localFilePath)
  * Устанавливает соединение с FTP-сервером. Убеждается в успешной логинизации
  *
  * @return resource
+ *
  * @throws Exception
  * @throws ErrorException Выбрасывается вместо Warning - значит ошибка соединения с ftp
  */
@@ -743,18 +761,18 @@ function updateClaimsTable(): void
 
     // Получаем DomNodeList со всеми shipment claim
 
-    $xmlClaims = $xml->getElementsByTagName('shippment_claim');
+    $xmlClaims = $xml->getElementsByTagName(XML_CLAIM);
 
     // Формируем массив со всеми shipment claim
 
     $allClaims = []; // Массив каждый элемент которого относится к конкретному shipment claim с ключами: date, recipient, productCount
 
     foreach ($xmlClaims as $xmlClaim) {
-        $claimDate = $xmlClaim->getAttribute('date');
-        $claimRecipient = $xmlClaim->getAttribute('recipient');
-        $claimProductCount = $xmlClaim->getElementsByTagName('product')->length;
+        $claimDate = $xmlClaim->getAttribute(XML_DATE);
+        $claimRecipient = $xmlClaim->getAttribute(XML_RECIPIENT);
+        $claimProductCount = $xmlClaim->getElementsByTagName(XML_PRODUCT)->length;
 
-        $allClaims[] = ['date' => $claimDate, 'recipient' => $claimRecipient, 'productCount' => $claimProductCount];
+        $allClaims[] = [KEY_ALL_CLAIMS_DATE => $claimDate, KEY_ALL_CLAIMS_RECIPIENT => $claimRecipient, KEY_ALL_CLAIMS_PROD_COUNT => $claimProductCount];
     }
 
     saveAllClaims($allClaims);
@@ -820,12 +838,12 @@ function logStartDelete(): void
 {
     $string = str_repeat("-", 50) . PHP_EOL . "Было запрошено удалить:" . PHP_EOL;
 
-    if ($_POST["deleteDate"] && is_string($_POST["deleteDate"])) {
-        $string = $string . "date: " . $_POST["deleteDate"] . "  ;  ";
+    if ($_POST[POST_DELETE_DATE] && is_string($_POST[POST_DELETE_DATE])) {
+        $string = $string . sprintf("%s: %s  ;  ", POST_DELETE_DATE, $_POST[POST_DELETE_DATE]);
     }
 
-    if ($_POST["deleteRecipient"] && is_string($_POST["deleteRecipient"])) {
-        $string = $string . "recipient: " . $_POST["deleteRecipient"];
+    if ($_POST[POST_DELETE_RECIPIENT] && is_string($_POST[POST_DELETE_RECIPIENT])) {
+        $string = $string . sprintf("%s: %s  ;  ", POST_DELETE_RECIPIENT, $_POST[POST_DELETE_RECIPIENT]);
     }
 
     logMsg($string);
@@ -841,12 +859,12 @@ function logStartMain(): void
 {
     $string = str_repeat("-", 50) . PHP_EOL . "Были присланы данные:";
 
-    if ($_POST["date"] && is_string($_POST["date"])) {
-        $string = $string . PHP_EOL . "Дата: " . $_POST["date"];
+    if ($_POST["date"] && is_string($_POST[POST_DATE])) {
+        $string = $string . PHP_EOL . "Дата: " . $_POST[POST_DATE];
     }
 
     foreach ($_FILES as $key => $sentFile) {
-        $string = $string . PHP_EOL . $key . " ||| название файла: " . $sentFile["name"] . " ||| Размер: " . $sentFile["size"];
+        $string = $string . PHP_EOL . $key . " ||| название файла: " . $sentFile["name"] . " ||| Размер: " . $sentFile[FILES_SIZE_KEY];
     }
 
     logMsg($string);

@@ -69,16 +69,19 @@
             <?php
             $id = 1;
             foreach ($allClaims as $claim) {
+                $claimDate = $claim[KEY_ALL_CLAIMS_DATE];
+                $claimRecipient = $claim[KEY_ALL_CLAIMS_RECIPIENT];
+                $claimProdCount = $claim[KEY_ALL_CLAIMS_PROD_COUNT];
                 echo "<tr>";
                 echo "<td>$id</td>";
-                echo "<td>" . $claim['date'] . "</td>";
-                echo "<td>" . $claim['recipient'] . "</td>";
-                echo "<td>" . $claim['productCount'] . "</td>";
-                if ($claim['date'] > $currentTime->format("Y-m-d") ) {
+                echo "<td>" . $claimDate . "</td>";
+                echo "<td>" . $claimRecipient . "</td>";
+                echo "<td>" . $claimProdCount . "</td>";
+                if ($claimDate > $currentTime->format("Y-m-d") ) {
                     echo '<td><form action="" method="post">';
                     echo '<input class="btn-sm btn-primary" type="submit" name="delete" value="Удалить" />';
-                    echo '<textarea name="deleteDate" style="display: none;">' . $claim['date'] . '</textarea>';
-                    echo '<textarea name="deleteRecipient" style="display: none;">' . $claim['recipient'] . '</textarea>';
+                    echo '<textarea name="deleteDate" style="display: none;">' . $claimDate . '</textarea>';
+                    echo '<textarea name="deleteRecipient" style="display: none;">' . $claimRecipient . '</textarea>';
                     echo '</form></td>';
                 }
                 echo "/<tr>";
