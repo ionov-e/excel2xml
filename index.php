@@ -77,7 +77,7 @@ if (isset($_POST[POST_SUBMIT_HARD])) {     // Форма из Popup-окна с 
 
 // ---------------------------------------------- Формирование таблицы
 
-$allClaims = getAllClaims();
+$allClaims = array_reverse(getAllClaims());
 
 // ---------------------------------------------- Функции
 
