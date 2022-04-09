@@ -43,13 +43,9 @@ if (date("H") > 15 || (date("H") == 15 && date("i") > 30)) {
 
 preSettings();
 
-// Обновление данных для таблицы с shipment claims, если старые
+// Обновление таблицы, если необходимо
 
-$timeClaimsUpdated = filemtime (ALL_CLAIMS_COPY_PATH);
-
-if (time() - $timeClaimsUpdated > REFRESH_CLAIMS_TABLE_TIME) {
-    updateClaimsTable();
-}
+$allClaims = getAllClaims();
 
 // ---------------------------------------------- Отправлена форма
 
@@ -91,6 +87,35 @@ function preSettings(): void
     set_error_handler(function ($err_severity, $err_msg, $err_file, $err_line, array $err_context) {
         throw new ErrorException($err_msg, 0, $err_severity, $err_file, $err_line);
     }, E_WARNING);
+}
+
+/**
+ * Возвращает массив с актуальными shipment claims.
+ *
+ * @return array Каждый shipment claim представлен ассоц. массивом с ключами: date, recipient, productCount
+ */
+function getAllClaims(): array
+{
+    try {
+        // Обновление данных для таблицы с shipment claims. Создаем файл, если нет или обновляем файл, если устаревший
+
+        if (!file_exists(ALL_CLAIMS_COPY_PATH) || (time() - filemtime (ALL_CLAIMS_COPY_PATH) > REFRESH_CLAIMS_TABLE_TIME)) {
+            updateClaimsTable();
+        }
+
+        // Читаем файл, возвращаем массив
+
+        if (file_exists(ALL_CLAIMS_COPY_PATH)) {
+            return unserialize(file_get_contents(ALL_CLAIMS_COPY_PATH));
+        }
+    } catch (Exception $e) {
+        logMsg("При создании обновлении таблицы получили Exception: " . $e->getMessage());
+    }
+
+    // Если все равно не создался - странно и плохо, но не причина совсем не работать
+
+    logMsg("Совсем не получается создать файл со всеми shipment claims: " . ALL_CLAIMS_COPY_PATH);
+    return [];
 }
 
 /**
@@ -198,10 +223,10 @@ function execDespiteWarning(&$alertClass, &$alertMsg)
 function processData(array $receivedExcels, string &$localXmlPath, string &$warehouseMsg)
 {
     // Получение искомого массива из экселя и старого Xml
-    $allClaims = getAllClaims($receivedExcels, $warehouseMsg);
+    $allClaimsAsNodes = getAllClaimsAsNodes($receivedExcels, $warehouseMsg);
 
     // Создание xml файла в указанном пути
-    createXml($allClaims, $localXmlPath);
+    createXml($allClaimsAsNodes, $localXmlPath);
 
     // Отправка файла на FTP сервер на этом этапе, только когда не было противоречий с файлом ассортимента
     if (empty($warehouseMsg)) {
@@ -224,7 +249,7 @@ function processData(array $receivedExcels, string &$localXmlPath, string &$ware
  * @throws ErrorException
  * @throws PhpSpreadsheetException
  */
-function getAllClaims(array $receivedExcels, string &$warehouseMsg): array
+function getAllClaimsAsNodes(array $receivedExcels, string &$warehouseMsg): array
 {
     // Создание временного объекта для хранения содержимого будущего XML-файла с 'shippment_claim' без необходимых родительских категорий
 
@@ -279,14 +304,14 @@ function getAllClaims(array $receivedExcels, string &$warehouseMsg): array
 /**
  * Создает XML-файл по указанному пути
  *
- * @param array $allClaims Массив со всеми отсортированными и отобранными 'shippment_claim' в виде нодов (Nodes) из временного DOMDocument
+ * @param array $allClaimsAsNodes Массив со всеми отсортированными и отобранными 'shippment_claim' в виде нодов (Nodes) из временного DOMDocument
  * @param string $localXmlPath Путь куда сохранить созданный файл
  *
  * @return void
  *
  * @throws DOMException
  */
-function createXml(array $allClaims, string $localXmlPath): void
+function createXml(array $allClaimsAsNodes, string $localXmlPath): void
 {
     $currentTime = new DateTime(); // Получение текущего времени
 
@@ -325,7 +350,7 @@ function createXml(array $allClaims, string $localXmlPath): void
 
     $dom->appendChild($root1);
     $root1->appendChild($root2);
-    foreach ($allClaims as $tempClaim) {
+    foreach ($allClaimsAsNodes as $tempClaim) {
         $newNode = $dom->importNode($tempClaim, true);
         $root2->appendChild($newNode);
     }
