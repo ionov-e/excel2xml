@@ -33,7 +33,6 @@ $alertMsg = "";             // Содержание блока alert
 $warehouseMsg = "";         // Содержание для сообщения в Popup-окне в случае несоответствия с ассортиментом
 $localXmlPath = "";         // Адрес где будет храниться созданный файл для передачи на фтп
 
-$currentTime = new DateTime();
 $modifyDays = 1;
 if (date("H") > 15 || (date("H") == 15 && date("i") > 30)) {
     $modifyDays = 2;
@@ -163,7 +162,7 @@ function main(&$alertClass, &$alertMsg, &$warehouseMsg, &$localXmlPath)
 
         if (empty($warehouseMsg)) {
             $alertClass = "success";
-            $alertMsg = "Скрипт отработал без ошибок. Количество полученных файлов: " . count($receivedExcels);
+            $alertMsg = "Файлы успешно загружены. Количество полученных файлов: " . count($receivedExcels);
             updateClaimsTable();
         } else {
             $alertClass = "warning";
@@ -200,7 +199,7 @@ function execDespiteWarning(&$alertClass, &$alertMsg)
         if (isset($_POST["readyXml"])) {
             uploadToFtp(RESULT_FILENAME, $_POST["readyXml"]);
             logMsg("Xml отправлен без ошибок");
-            $alertMsg = "Скрипт отработал без ошибок";
+            $alertMsg = "Файлы успешно загружены";
             $alertClass = "success";
             updateClaimsTable();
         } else {
@@ -874,6 +873,4 @@ function logMsg(string $logString): void
     file_put_contents($logFileAddress, $logString, FILE_APPEND);
 }
 
-include 'upload-form.php'; // Html Форма
-
-?>
+include 'templates/upload-form.php'; // Html Форма
