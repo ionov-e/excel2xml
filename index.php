@@ -12,15 +12,9 @@ const RECIPIENT_SPB = 'ozon_spb';   // Используется в XML (в 'clai
 const FILENAME_MSK = 'mskFile';
 const RECIPIENT_MSK = 'ozon_msk';
 
-const REFRESH_CLAIMS_TABLE_TIME = 2 * 60 * 60; // Через сколько времени считать таблицу неактуальной и пересоздать данные для нее
-const MAX_OLD_DATE = '-14 days'; // Используется в функции strtotime. Максимальное количество дней для хранения 'shippment_claim'
-
-const RESULT_FILENAME = 'candy_order_xml_test.xml'; // С таким именем файл зальется на ФТП #TODO убрать 'test_'
-const WAREHOUSE_PRICE_LIST_FILE = 'candy_pricing.xml'; // Название файла с ценами и количеством на фтп
-
 const LOG_FOLDER_ROOT = 'log';                      // Произвольное имя папки для хранения логов
 const GEN_FOLDER = 'gen';                           // Произвольное имя папки, где будем хранить сгенерированные файлы
-const OLD_XML_FILENAME = 'old_' . RESULT_FILENAME;  // Произвольное имя временного файла (прошлый xml файл с ФТП)
+const OLD_XML_FILENAME = 'xml_from_ftp.xml';        // Произвольное имя временного файла (прошлый xml файл с ФТП)
 const TEMP_ROOT_ELEMENT = 'temp';                   // Произвольное имя элемента временного файла
 //Путь к сгенерированному файлу с массивом всех актуальных Shipment Claims
 const ALL_CLAIMS_COPY_PATH = __DIR__ . DIRECTORY_SEPARATOR . GEN_FOLDER . DIRECTORY_SEPARATOR . 'all_claims.txt';
@@ -122,7 +116,7 @@ function getAllClaims(): array
     try {
         // Обновление данных для таблицы с shipment claims. Создаем файл, если нет или обновляем файл, если устаревший
 
-        if (!file_exists(ALL_CLAIMS_COPY_PATH) || (time() - filemtime(ALL_CLAIMS_COPY_PATH) > REFRESH_CLAIMS_TABLE_TIME)) {
+        if (!file_exists(ALL_CLAIMS_COPY_PATH) || (time() - filemtime(ALL_CLAIMS_COPY_PATH) > $_ENV['REFRESH_CLAIMS_TABLE_TIME'])) {
             updateClaimsTable();
         }
 
@@ -150,7 +144,7 @@ function main(&$alertClass, &$alertMsg, &$warehouseMsg, &$localXmlPath)
 {
     try {
         // Адрес где будет храниться временный созданный файл Xml для передачи на фтп
-        $localXmlPath = sys_get_temp_dir() . DIRECTORY_SEPARATOR . RESULT_FILENAME;
+        $localXmlPath = sys_get_temp_dir() . DIRECTORY_SEPARATOR . $_ENV['RESULT_FILENAME'];
 
         // Проверки на отсутствие присланных данных
         if (!$_POST[POST_DATE]) {
@@ -215,7 +209,7 @@ function execDespiteWarning(&$alertClass, &$alertMsg)
 {
     try {
         if (isset($_POST[POST_READY_XML])) {
-            uploadToFtp(RESULT_FILENAME, $_POST[POST_READY_XML]);
+            uploadToFtp($_ENV['RESULT_FILENAME'], $_POST[POST_READY_XML]);
             logMsg("Xml отправлен без ошибок");
             $alertMsg = "Скрипт отработал без ошибок";
             $alertClass = "success";
@@ -253,7 +247,7 @@ function processData(array $receivedExcels, string &$localXmlPath, string &$ware
 
     // Отправка файла на FTP сервер на этом этапе, только когда не было противоречий с файлом ассортимента
     if (empty($warehouseMsg)) {
-        uploadToFtp(RESULT_FILENAME, $localXmlPath);
+        uploadToFtp($_ENV['RESULT_FILENAME'], $localXmlPath);
     }
 }
 
@@ -395,7 +389,7 @@ function processOldXml(array $receivedExcels): array
 {
     // Выкачиваем файл с фтп
     $localFilePathToOldXml = sys_get_temp_dir() . DIRECTORY_SEPARATOR . OLD_XML_FILENAME; // Адрес куда временно запишем старый Xml
-    if (!getFileFromFtp(RESULT_FILENAME, $localFilePathToOldXml)) {
+    if (!getFileFromFtp($_ENV['RESULT_FILENAME'], $localFilePathToOldXml)) {
         return [];
     }
 
@@ -413,7 +407,7 @@ function processOldXml(array $receivedExcels): array
 
     $oldXmlClaims = $oldXml->getElementsByTagName(XML_CLAIM);
 
-    $minRelevantDate = date('Y-m-d', strtotime(MAX_OLD_DATE)); // Все что раньше этой даты не возвращать
+    $minRelevantDate = date('Y-m-d', strtotime($_ENV['MAX_OLD_DATE'])); // Все что раньше этой даты не возвращать
 
     $recipientList = []; // Элемент - значение 'recipient' на каждый из присланных экселей
     foreach ($receivedExcels as $singleReceivedExcel) {
@@ -480,9 +474,9 @@ function excelToXmlNode(string $fileName, string $recipient, DOMDocument &$dom, 
 
     // Выкачиваем файл с наличием товаров с фтп
 
-    $localFilePathToPriceList = sys_get_temp_dir() . DIRECTORY_SEPARATOR . WAREHOUSE_PRICE_LIST_FILE; // Адрес куда временно запишем прайслист
+    $localFilePathToPriceList = sys_get_temp_dir() . DIRECTORY_SEPARATOR . $_ENV['WAREHOUSE_PRICE_LIST_FILE']; // Адрес куда временно запишем прайслист
 
-    if (getFileFromFtp(WAREHOUSE_PRICE_LIST_FILE, $localFilePathToPriceList)) {
+    if (getFileFromFtp($_ENV['WAREHOUSE_PRICE_LIST_FILE'], $localFilePathToPriceList)) {
         $warehouseMsg = $warehouseMsg . 'Файл на фтп с прайс-листом отсутствует. Нет возможности перепроверить наличие';
     }
 
@@ -502,7 +496,7 @@ function excelToXmlNode(string $fileName, string $recipient, DOMDocument &$dom, 
     foreach ($warehouseOffers as $offer) {
         $offerSku = $offer->getAttribute('xmlId');
         if (array_key_exists($offerSku, $stock)) { // Проверка на случай ошибки в файле на фтп
-            logMsg("В файле склада (" . WAREHOUSE_PRICE_LIST_FILE . ") повторяется sku: $offerSku");
+            logMsg("В файле склада ({$_ENV['WAREHOUSE_PRICE_LIST_FILE']}) повторяется sku: $offerSku");
         }
         $stock[$offerSku] = $offer->getAttribute('stock_mow');
     }
@@ -607,7 +601,7 @@ function deleteMain(string &$alertClass, string &$alertMsg)
         }
 
         // Адрес где будет храниться временный созданный файл Xml для передачи на фтп
-        $localXmlPath = sys_get_temp_dir() . DIRECTORY_SEPARATOR . RESULT_FILENAME;
+        $localXmlPath = sys_get_temp_dir() . DIRECTORY_SEPARATOR . $_ENV['RESULT_FILENAME'];
 
         // Получение искомого массива из актуального Xml
         $uselessString = ''; // Необходима какая-то строка для метода следующего. Не используется больше
@@ -620,7 +614,7 @@ function deleteMain(string &$alertClass, string &$alertMsg)
         createXml($allClaimsAsNodes, $localXmlPath);
 
         // Отправка файла на FTP сервер
-        uploadToFtp(RESULT_FILENAME, $localXmlPath);
+        uploadToFtp($_ENV['RESULT_FILENAME'], $localXmlPath);
 
         // Подготовка вывода сообщения для пользователя
         $alertClass = 'success';
@@ -672,7 +666,7 @@ function getFileFromFtp(string $remoteFilepath, string $localFilepath): bool
 
     $listOfFilesOnServer = ftp_nlist($ftp, '');
 
-    if (!in_array(RESULT_FILENAME, $listOfFilesOnServer)) {
+    if (!in_array($_ENV['RESULT_FILENAME'], $listOfFilesOnServer)) {
         logMsg("На фтп не было такого файла: $remoteFilepath");
         return false;
     }
@@ -752,7 +746,7 @@ function updateClaimsTable(): void
 
     // Скачиваем актуальный Xml с фтп
 
-    getFileFromFtp(RESULT_FILENAME, $localFilePathToOldXml);
+    getFileFromFtp($_ENV['RESULT_FILENAME'], $localFilePathToOldXml);
 
     // Получаем DOMDocument из файла
 
