@@ -8,6 +8,8 @@
  *
  * @var string $warehouseMsg Сообщение для Popup-окна, в случае, когда отправили таблицу с несоответствиями с наличием
  * @var string $localXmlPath Локальный путь хранения уже готового Xml для случая, когда нужно лишнее подтверждение перед Фтп-отправкой
+ *
+ * @var array $allClaims Массив со всеми shipment claim. Каждый в виде ассоц. массива с ключами: date, recipient, productCount
  */
 ?>
 <!doctype html>
@@ -51,6 +53,34 @@
     </form>
 
 
+    <?php if (!empty($allClaims)): ?>
+        <h2 class="pt-5 text-center">Таблица с shipment claims</h2>
+        <table class="table table-hover">
+            <thead>
+            <tr>
+                <th>Id</th>
+                <th>Дата</th>
+                <th>Склад</th>
+                <th>Кол-во товаров</th>
+            </tr>
+            </thead>
+            <tbody>
+            <?php
+            $id = 1;
+            foreach ($allClaims as $claim) {
+                echo "<tr>";
+                echo "<td>$id</td>";
+                echo "<td>" . $claim['date'] . "</td>";
+                echo "<td>" . $claim['recipient'] . "</td>";
+                echo "<td>" . $claim['productCount'] . "</td>";
+                echo "/<tr>";
+                $id++;
+            }
+            ?>
+            </tbody>
+        </table>
+    <?php endif; ?>
+
     <!-- The Modal -->
     <?php if (!empty($warehouseMsg)): ?>
         <div class="modal" id="myModal" style="display: block; backdrop-filter: blur(3px);">
@@ -69,7 +99,8 @@
 
                     <div class="modal-footer">
                         <form action="" method="post" class="was-validated" enctype="multipart/form-data">
-                            <textarea rows="1" name="readyXml" style="display: none;"><?php echo $localXmlPath ?></textarea>
+                            <textarea rows="1" name="readyXml"
+                                      style="display: none;"><?php echo $localXmlPath ?></textarea>
                             <button id="modalCloseButton" type="reset" name="reset" class="btn btn-primary"
                                     data-dismiss="modal">Заново выбрать файлы
                             </button>
