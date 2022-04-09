@@ -43,10 +43,6 @@ if (date("H") > 15 || (date("H") == 15 && date("i") > 30)) {
 
 preSettings();
 
-// Обновление таблицы, если необходимо
-
-$allClaims = getAllClaims();
-
 // ---------------------------------------------- Отправлена форма
 
 if (isset($_POST['submit-hard'])) {     // Форма из Popup-окна с подтверждением отправки файла несмотря на несоответствия с ассортиментом
@@ -55,12 +51,22 @@ if (isset($_POST['submit-hard'])) {     // Форма из Popup-окна с п�
 
     execDespiteWarning($alertClass, $alertMsg); // Загрузить уже готовый с прошлого раза Xml
 
+} elseif (isset($_POST['delete'])) {    // Кнопка удаления
+
+    logStartDelete(); // Логирует старт работы с присланными данными
+
+    deleteMain($alertClass, $alertMsg); // Вызов главной функции
+
 } elseif (isset($_POST['submit'])) {    // Основная форма
 
-    logStartMsg(); // Логирует старт работы с присланными данными
+    logStartMain(); // Логирует старт работы с присланными данными
 
     main($alertClass, $alertMsg, $warehouseMsg, $localXmlPath); // Вызов главной функции
 }
+
+// ---------------------------------------------- Формирование таблицы
+
+$allClaims = getAllClaims();
 
 // ---------------------------------------------- Функции
 
@@ -99,7 +105,7 @@ function getAllClaims(): array
     try {
         // Обновление данных для таблицы с shipment claims. Создаем файл, если нет или обновляем файл, если устаревший
 
-        if (!file_exists(ALL_CLAIMS_COPY_PATH) || (time() - filemtime (ALL_CLAIMS_COPY_PATH) > REFRESH_CLAIMS_TABLE_TIME)) {
+        if (!file_exists(ALL_CLAIMS_COPY_PATH) || (time() - filemtime(ALL_CLAIMS_COPY_PATH) > REFRESH_CLAIMS_TABLE_TIME)) {
             updateClaimsTable();
         }
 
@@ -232,7 +238,6 @@ function processData(array $receivedExcels, string &$localXmlPath, string &$ware
     if (empty($warehouseMsg)) {
         uploadToFtp(RESULT_FILENAME, $localXmlPath);
     }
-
 }
 
 /**
@@ -569,6 +574,71 @@ function excelToXmlNode(string $fileName, string $recipient, DOMDocument &$dom, 
 }
 
 /**
+ * Обработка запроса на удаление
+ *
+ * @param string $alertClass
+ * @param string $alertMsg
+ *
+ * @return void
+ */
+function deleteMain(string &$alertClass, string &$alertMsg)
+{
+    try {
+        // Проверка, что фронт отработал верно
+        if (!$_POST["deleteDate"] || !$_POST["deleteRecipient"]) {
+            throw new Exception("В Post не было: deleteDate и deleteRecipient");
+        }
+
+        // Адрес где будет храниться временный созданный файл Xml для передачи на фтп
+        $localXmlPath = sys_get_temp_dir() . DIRECTORY_SEPARATOR . RESULT_FILENAME;
+
+        // Получение искомого массива из актуального Xml
+        $uselessString = ''; // Необходима какая-то строка для метода следующего. Не используется больше
+        $allClaimsAsNodes = getAllClaimsAsNodes([], $uselessString);
+
+        // Удаление запрашиваемого shipment claim
+        deleteClaim($allClaimsAsNodes);
+
+        // Создание xml файла в указанном пути
+        createXml($allClaimsAsNodes, $localXmlPath);
+
+        // Отправка файла на FTP сервер
+        uploadToFtp(RESULT_FILENAME, $localXmlPath);
+
+        // Подготовка вывода сообщения для пользователя
+        $alertClass = 'success';
+        $alertMsg = sprintf('Успешно удален выбранный shipment claim с date: %s и recipient: %s',
+            $_POST["deleteDate"], $_POST["deleteRecipient"]);
+
+        // Обновить таблицу
+        updateClaimsTable();
+
+    } catch (Exception $e) {
+        logMsg("Exception: " . $e->getMessage());
+        $alertMsg = 'Что-то пошло не так. Не удалось удалить выбранный shipment claim';
+    }
+
+    logMsg("Пользователь увидел в блоке alert: $alertMsg");
+}
+
+/**
+ * Удаление shippment claim по запросу пользователя из массива с Node
+ *
+ * @param array $allClaimsAsNodes
+ *
+ * @return void
+ */
+function deleteClaim(array &$allClaimsAsNodes)
+{
+    foreach ($allClaimsAsNodes as $key => $claimNode) {
+        if ($_POST["deleteDate"] == $claimNode->getAttribute('date') &&
+            $_POST["deleteRecipient"] == $claimNode->getAttribute('recipient')) {
+            unset($allClaimsAsNodes[$key]);
+        }
+    }
+}
+
+/**
  * Выкачивает файл с фтп
  *
  * @param string $remoteFilepath Путь куда сохраняем
@@ -742,11 +812,32 @@ function moveToGenFolder(string $tempFilePath, string $newFileName): string
 }
 
 /**
- * Логирует старт работы. Пишет в лог все что прислали из формы
+ * Логирует старт работы при запросе на удаление
  *
  * @return void
  */
-function logStartMsg(): void
+function logStartDelete(): void
+{
+    $string = str_repeat("-", 50) . PHP_EOL . "Было запрошено удалить:" . PHP_EOL;
+
+    if ($_POST["deleteDate"] && is_string($_POST["deleteDate"])) {
+        $string = $string . "date: " . $_POST["deleteDate"] . "  ;  ";
+    }
+
+    if ($_POST["deleteRecipient"] && is_string($_POST["deleteRecipient"])) {
+        $string = $string . "recipient: " . $_POST["deleteRecipient"];
+    }
+
+    logMsg($string);
+}
+
+
+/**
+ * Логирует старт работы. Пишет в лог все что прислали из основной формы
+ *
+ * @return void
+ */
+function logStartMain(): void
 {
     $string = str_repeat("-", 50) . PHP_EOL . "Были присланы данные:";
 

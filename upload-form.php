@@ -54,7 +54,7 @@
 
 
     <?php if (!empty($allClaims)): ?>
-        <h2 class="pt-5 text-center">Таблица с shipment claims</h2>
+        <h2 class="pt-5 text-center">Таблица с shipment claims (<?php echo (count($allClaims)) ?>)</h2>
         <table class="table table-hover">
             <thead>
             <tr>
@@ -62,6 +62,7 @@
                 <th>Дата</th>
                 <th>Склад</th>
                 <th>Кол-во товаров</th>
+                <th></th>
             </tr>
             </thead>
             <tbody>
@@ -73,6 +74,13 @@
                 echo "<td>" . $claim['date'] . "</td>";
                 echo "<td>" . $claim['recipient'] . "</td>";
                 echo "<td>" . $claim['productCount'] . "</td>";
+                if ($claim['date'] > $currentTime->format("Y-m-d") ) {
+                    echo '<td><form action="" method="post">';
+                    echo '<input class="btn-sm btn-primary" type="submit" name="delete" value="Удалить" />';
+                    echo '<textarea name="deleteDate" style="display: none;">' . $claim['date'] . '</textarea>';
+                    echo '<textarea name="deleteRecipient" style="display: none;">' . $claim['recipient'] . '</textarea>';
+                    echo '</form></td>';
+                }
                 echo "/<tr>";
                 $id++;
             }
