@@ -23,7 +23,7 @@
                             data-dismiss="modal">
                         Заново выбрать файлы
                     </button>
-                    <button type="submit" name="<?=POST_SUBMIT_HARD?>" class="btn btn-primary">
+                    <button type="submit" name="<?=POST_SUBMIT_HARD?>" class="btn btn-primary my-listen-btn">
                         Отправить без изменений
                     </button>
                 </form>

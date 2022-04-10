@@ -31,7 +31,7 @@
             <td>
                 <?php if ($claimDate > (new DateTime())->format("Y-m-d")):?>
                     <form action="" method="post">
-                        <input class="btn-sm btn-primary" type="submit" name="<?=POST_DELETE?>" value="Удалить" />
+                        <input class="btn-sm btn-primary my-listen-btn" type="submit" name="<?=POST_DELETE?>" value="Удалить" />
                         <input type="hidden" name="<?=POST_DELETE_DATE?>" value="<?=$claimDate?>">
                         <input type="hidden" name="<?=POST_DELETE_RECIPIENT?>" value="<?=$claimRecipient?>">
                     </form>

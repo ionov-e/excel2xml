@@ -115,7 +115,9 @@ function getAllClaims(): array
     try {
         // Обновление данных для таблицы с shipment claims. Создаем файл, если нет или обновляем файл, если устаревший
 
-        if (!file_exists(ALL_CLAIMS_COPY_PATH) || (time() - filemtime(ALL_CLAIMS_COPY_PATH) > $_ENV['REFRESH_CLAIMS_TABLE_TIME'])) {
+        $refreshTime = 60 * 60 * $_ENV['REFRESH_CLAIMS_TABLE_TIME'];
+
+        if (!file_exists(ALL_CLAIMS_COPY_PATH) || (time() - filemtime(ALL_CLAIMS_COPY_PATH) > $refreshTime)) {
             updateClaimsTable();
         }
 
