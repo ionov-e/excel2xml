@@ -20,9 +20,11 @@
                 <form action="" method="post" class="was-validated" enctype="multipart/form-data">
                             <input type="hidden" name="<?=POST_READY_XML?>" value="<?=$localXmlPath?>">
                     <button id="modalCloseButton" type="reset" name="reset" class="btn btn-primary"
-                            data-dismiss="modal">Заново выбрать файлы
+                            data-dismiss="modal">
+                        Заново выбрать файлы
                     </button>
-                    <button type="submit" name="<?=POST_SUBMIT_HARD?>" class="btn btn-primary">Отправить без изменений
+                    <button type="submit" name="<?=POST_SUBMIT_HARD?>" class="btn btn-primary">
+                        Отправить без изменений
                     </button>
                 </form>
             </div>
