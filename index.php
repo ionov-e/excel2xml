@@ -90,9 +90,14 @@ $allClaims = array_reverse(getAllClaims());
 function preSettings(): void
 {
 // Из файла .env берем значения для FTP соединения
+    try {
+        $dotenv = Dotenv::createImmutable(__DIR__);
+        $dotenv->load();
+    }catch (Exception $e) {
+        printf("Error: %s in %s(%d)", $e->getMessage(), $e->getFile(), $e->getLine());
+        exit(1);
+    }
 
-    $dotenv = Dotenv::createImmutable(__DIR__);
-    $dotenv->load();
 
 // Установка часового пояса как в примере (где бы не выполнялся скрипт - одинаковое время)
 
