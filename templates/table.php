@@ -17,19 +17,23 @@
     </thead>
     <tbody>
     <?php
-        $id = 0;
-        foreach ($allClaims as $claim):
-            $claimDate = $claim[KEY_ALL_CLAIMS_DATE];
-            $claimRecipient = $claim[KEY_ALL_CLAIMS_RECIPIENT];
-            $claimProdCount = $claim[KEY_ALL_CLAIMS_PROD_COUNT];
-            ?>
+    $id = 0;
+    foreach ($allClaims as $claim):
+        $claimDate = $claim[KEY_ALL_CLAIMS_DATE];
+        $claimRecipient = $claim[KEY_ALL_CLAIMS_RECIPIENT];
+        $claimProdCount = $claim[KEY_ALL_CLAIMS_PROD_COUNT];
+        ?>
         <tr>
             <td><?=++$id?></td>
             <td><?=$claimDate?></td>
             <td><?=$claimRecipient?></td>
             <td><?=$claimProdCount?></td>
             <td>
-                <?php if ($claimDate > (new DateTime())->format("Y-m-d")):?>
+                <?php if (0 == $claimProdCount):?>
+                    <button class="btn btn-light" disabled>
+                        Удален
+                    </button>
+                <?php elseif ($claimDate > (new DateTime())->format("Y-m-d")):?>
                     <form action="" method="post">
                         <input class="btn-sm btn-primary my-listen-btn" type="submit" name="<?=POST_DELETE?>" value="Удалить" />
                         <input type="hidden" name="<?=POST_DELETE_DATE?>" value="<?=$claimDate?>">

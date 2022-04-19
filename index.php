@@ -647,10 +647,12 @@ function deleteMain(string &$alertClass, string &$alertMsg)
  */
 function deleteClaim(array &$allClaimsAsNodes)
 {
-    foreach ($allClaimsAsNodes as $key => $claimNode) {
+    foreach ($allClaimsAsNodes as $claimNode) {
         if ($_POST[POST_DELETE_DATE] == $claimNode->getAttribute(XML_DATE) &&
             $_POST[POST_DELETE_RECIPIENT] == $claimNode->getAttribute(XML_RECIPIENT)) {
-            unset($allClaimsAsNodes[$key]);
+            while ($claimNode->hasChildNodes()) {
+                $claimNode->removeChild($claimNode->firstChild);
+            }
         }
     }
 }
